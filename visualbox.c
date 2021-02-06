@@ -78,7 +78,7 @@ int main(int argc, char ** argv){
         // add spaces at end if missing room
         c += 4;
         // after i memset it doesnt seem to want me to set vals outside of the memset so im just going to memset more and then it should work
-        if(width > visstrlen + 1)
+        if(width > visstrlen)
             memset(c, ' ', width - visstrlen + 1);
         // add Null char to end string
         c[width-visstrlen] = '\0';
