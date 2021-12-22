@@ -7,6 +7,9 @@
 #include <wchar.h>
 #include <locale.h>
 
+#define END_COL_LEN 4
+#define END_COL_STR ("\033[0m")
+
 
 // cut out a box width by height from stdin
 // dont count ansi color codes, so the box is visually width by height
@@ -50,6 +53,7 @@ int main(const int argc, const char * const argv[]){
     }
     char *locale;
     locale = setlocale(LC_ALL, "");
+    (void) locale;
 
     /* printf("stdout orientation:\t%d\n", fwide(stdout, 0)); */
     /* printf("stdin orientation:\t%d\n", fwide(stdin, 1)); */
@@ -68,25 +72,27 @@ int main(const int argc, const char * const argv[]){
     size_t len = (width + 1) * (sizeof *c);
     char * line = (char *)malloc(len);
     memset(line, 0, len);       // set the line to all NULL chars
-    char * const spaces = calloc(tabsize, sizeof (char));
+    char * const spaces = (char *)calloc(tabsize, sizeof (char));
     memset(spaces, ' ', tabsize);
     ssize_t nread = 0;
     mbstate_t state = {0};
     int i = 1;
     for(int lineno = 0; lineno < height && ((nread = getline(&line, &len, file)) != -1); ++lineno){
         //fprintf(stderr, "line: %d (read %zd)\n", i, nread);
-        size_t cinc = 1;
+        size_t cInc = 1;
         bool usedColor = false;
-        for(c = line, increment = 1, visstrlen = 0; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cinc){
+        for(c = line, increment = 1, visstrlen = 0; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
             if(*c == '\033'){
                 // if c == \033 then starting color info, doesnt add to width
                 increment = 0;
                 usedColor = true;
-                cinc = 1;
+                cInc = 1;
+                // TODO save the place of the last unresolved color change to not add it to the output
+                //  (then clear this if we get something to print or a full color reset
             }else if(*c == '\t'){
                 // TODO should this go here or in the if(increment) block?
                 // if not enough room to just move the string then allocate more room
-                if(nread + tabsize > len){
+                if((size_t)(nread + tabsize) > len){
                     // not doing a realloc because i dont want to move the whole string and then have to move the end of the string again
                     // TODO try to check if we can actaully just make the buffer bigger and use the efficient form of realloc
                     // TODO maybe check how many tabs are left in the line so we can just allocate once for this line
@@ -95,7 +101,7 @@ int main(const int argc, const char * const argv[]){
                     memcpy(tmpLine, line, c - line);
                     char * tmpc = tmpLine + (c - line);
                     memcpy(tmpc, spaces, tabsize);
-                    strcpy(tmpc + tabsize, c+1);
+                    strcpy(tmpc + tabsize, c + 1);
                     free(line);
                     line = tmpLine;
                     c = tmpc;
@@ -108,21 +114,26 @@ int main(const int argc, const char * const argv[]){
                 nread += tabsize-1;
                 int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize;
                 visstrlen += tabAmount;
-                cinc = tabAmount;
+                cInc = tabAmount;
             }else if(increment){
-                cinc = mbrlen(c, nread + line - c, &state);
-                if((cinc == (size_t)-1) || (cinc == (size_t)-2)){
+                // get the number of chars in the current multi-byte char
+                cInc = mbrlen(c, nread + line - c, &state);
+                // if it was an error then break
+                if((cInc == (size_t)-1) || (cInc == (size_t)-2)){
                     // TODO figure out error
-                    fprintf(stderr, "error: mbrlen = %zd\n", cinc);
+                    fprintf(stderr, "error: mbrlen = %zd\n", cInc);
                     fprintf(stderr, "c: '%s', nread: %zd, line-c: %zd\n", c, nread, line-c);
                     break;
                 }
+                // get the current multi-byte char as a wchar
                 wchar_t wcs[2] = L"";
-                mbrtowc(wcs, c, cinc, &state);
-                //int inc = wcswidth(wcs, cinc / (sizeof wcs[0]) + 1);
+                mbrtowc(wcs, c, cInc, &state);
+                // get the width of the wide char to increment the visstrlen
+                //int inc = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
                 int inc = wcwidth(wcs[0]);
-                //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cinc, inc, (int)cinc, c);
+                //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cInc, inc, (int)cInc, c);
                 if(i > 0){
+                    // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
                     if(visstrlen + inc > width){
                         break;
                     }
@@ -133,25 +144,33 @@ int main(const int argc, const char * const argv[]){
             }else if(*c == 'm'){
                 // if c == m then ending color block, will start incrementing by width again
                 increment = 1;
+                if(!strncmp(c - (END_COL_LEN-1), END_COL_STR, END_COL_LEN)){
+                    // if this is just ending a color reset str then mark as no color used
+                    usedColor = false;
+                }
             }
         }
-#define END_COL_LEN 4
         if(usedColor){
             // add color reset at end
-            if(c - line + END_COL_LEN+1 > len){  // 5 is the length of the reset str
+            if((size_t)(c - line + END_COL_LEN+1) > len){  // END_COL_LEN is the length of the color reset str
                 len += END_COL_LEN+1;
+                size_t tmpdist = c - line;
                 line = (char *)realloc(line, len);
+                c = line + tmpdist;
             }
-            // TODO dont add this if the line doesnt have a color specifier
-            //memcpy(c, "\033[0m", END_COL_LEN);
-            strcpy(c, "\033[0m");
+            //memcpy(c, END_COL_STR, END_COL_LEN);
+            strcpy(c, END_COL_STR);
         }else{
             *c = '\0';
         }
+        //fprintf(stderr, "width: %d\n", visstrlen);
+
         // i can just end it here but in odd circumstances that arent typical of the use of this program its faster to use memset so my hands were tied
         // its really not about wanting to do that from the start and just about speed in real use definitely dont doubt me
         //printf("%s%-*s|\n", line, width - visstrlen, "");
         printf("%s%-*s%lc\n", line, width - visstrlen, "", L'│');
+        // TODO get the delim from clargs
+        //printf("%s%-*s%s\n", line, width - visstrlen, "", delim);
 
         // add spaces at end if missing room
         // TODO need to allocate more space to be able to do this (should allocate it at the same time as the usedColor realloc

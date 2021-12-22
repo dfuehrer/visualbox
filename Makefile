@@ -7,7 +7,7 @@ visualbox : ${OBJ}
 	$(CC) -o $@ ${OBJ}
 
 .c.o:
-	${CC} -c ${CFLAGS} $<
+	${CC} -c ${CFLAGS} $< -Wall -Wextra -Werror
 
 PHONY : clean install
 
