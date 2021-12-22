@@ -75,8 +75,8 @@ int main(const int argc, const char * const argv[]){
     size_t len = (width + 1) * (sizeof *c);
     char * line = (char *)malloc(len);
     memset(line, 0, len);       // set the line to all NULL chars
-    char * const spaces = (char *)calloc(tabsize, sizeof (char));
-    memset(spaces, ' ', tabsize);
+    //char * const spaces = (char *)calloc(tabsize, sizeof (char));
+    //memset(spaces, ' ', tabsize);
     ssize_t nread = 0;
     mbstate_t state = {0};
     int i = 1;
@@ -114,7 +114,8 @@ int main(const int argc, const char * const argv[]){
                         char * tmpLine = malloc(len);
                         memcpy(tmpLine, line, c - line);
                         char * tmpc = tmpLine + (c - line);
-                        memcpy(tmpc, spaces, tabAmount);
+                        //memcpy(tmpc, spaces, tabAmount);
+                        memset(tmpc, ' ', tabAmount);
                         strcpy(tmpc + tabAmount, c + 1);
                         free(line);
                         line = tmpLine;
@@ -122,7 +123,8 @@ int main(const int argc, const char * const argv[]){
                     }else{
                         // move the string forward and add in the spaces where the tab was
                         memmove(c + tabAmount, c + 1, nread + line - c);
-                        memcpy(c, spaces, tabAmount);
+                        //memcpy(c, spaces, tabAmount);
+                        memset(c, ' ', tabAmount);
                     }
                     // count all tabAmount spaces now
                     nread += tabAmount-1;
@@ -204,6 +206,6 @@ int main(const int argc, const char * const argv[]){
         ++i;
     }
     free(line);
-    free(spaces);
+    //free(spaces);
     return 0;
 }
