@@ -43,6 +43,8 @@ int main(const int argc, const char * const argv[]){
     if((width < 1) || (height < 1)){
         fputs("Seriously, if you want to output nothing there are easier ways\n", stderr);
         if(height > 0){
+            // if asked for no width then print out the number of empty lines asked for
+            // TODO should also read through the buffer if piped in
             char * line = calloc(height, sizeof (char));
             memset(line, '\n', height-1);
             line[height-1] = '\0';
@@ -69,6 +71,7 @@ int main(const int argc, const char * const argv[]){
 
     // start by allocating the bare minimum size
     char * c = NULL;
+    char * prevColStart = c;
     size_t len = (width + 1) * (sizeof *c);
     char * line = (char *)malloc(len);
     memset(line, 0, len);       // set the line to all NULL chars
@@ -81,65 +84,71 @@ int main(const int argc, const char * const argv[]){
         //fprintf(stderr, "line: %d (read %zd)\n", i, nread);
         size_t cInc = 1;
         bool usedColor = false;
-        for(c = line, increment = 1, visstrlen = 0; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
+        increment = 1;
+        visstrlen = 0;
+        for(c = prevColStart = line; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
             if(*c == '\033'){
                 // if c == \033 then starting color info, doesnt add to width
                 increment = 0;
                 usedColor = true;
                 cInc = 1;
-                // TODO save the place of the last unresolved color change to not add it to the output
-                //  (then clear this if we get something to print or a full color reset
-            }else if(*c == '\t'){
-                // TODO should this go here or in the if(increment) block?
-                // if not enough room to just move the string then allocate more room
-                if((size_t)(nread + tabsize) > len){
-                    // not doing a realloc because i dont want to move the whole string and then have to move the end of the string again
-                    // TODO try to check if we can actaully just make the buffer bigger and use the efficient form of realloc
-                    // TODO maybe check how many tabs are left in the line so we can just allocate once for this line
-                    len += tabsize;
-                    char * tmpLine = malloc(len);
-                    memcpy(tmpLine, line, c - line);
-                    char * tmpc = tmpLine + (c - line);
-                    memcpy(tmpc, spaces, tabsize);
-                    strcpy(tmpc + tabsize, c + 1);
-                    free(line);
-                    line = tmpLine;
-                    c = tmpc;
-                }else{
-                    // move the string forward and add in the spaces where the tab was
-                    memmove(c + tabsize, c + 1, nread + line - c);
-                    memcpy(c, spaces, tabsize);
-                }
-                // count all tabsize spaces now
-                nread += tabsize-1;
-                int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize;
-                visstrlen += tabAmount;
-                cInc = tabAmount;
+                // save the place of the last unresolved color change to not add it to the output
+                //  (we clear this if we get something to print or a full color reset so we dont actually have to set it here)
+                //prevColStart = c;
             }else if(increment){
-                // get the number of chars in the current multi-byte char
-                cInc = mbrlen(c, nread + line - c, &state);
-                // if it was an error then break
-                if((cInc == (size_t)-1) || (cInc == (size_t)-2)){
-                    // TODO figure out error
-                    fprintf(stderr, "error: mbrlen = %zd\n", cInc);
-                    fprintf(stderr, "c: '%s', nread: %zd, line-c: %zd\n", c, nread, line-c);
-                    break;
-                }
-                // get the current multi-byte char as a wchar
-                wchar_t wcs[2] = L"";
-                mbrtowc(wcs, c, cInc, &state);
-                // get the width of the wide char to increment the visstrlen
-                //int inc = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
-                int inc = wcwidth(wcs[0]);
-                //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cInc, inc, (int)cInc, c);
-                if(i > 0){
-                    // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
-                    if(visstrlen + inc > width){
+                if(*c == '\t'){
+                    // if the char is a tab then add spaces manually
+                    // if not enough room to just move the string then allocate more room
+                    if((size_t)(nread + tabsize) > len){
+                        // not doing a realloc because i dont want to move the whole string and then have to move the end of the string again
+                        // TODO try to check if we can actaully just make the buffer bigger and use the efficient form of realloc
+                        // TODO maybe check how many tabs are left in the line so we can just allocate once for this line
+                        len += tabsize;
+                        char * tmpLine = malloc(len);
+                        memcpy(tmpLine, line, c - line);
+                        char * tmpc = tmpLine + (c - line);
+                        memcpy(tmpc, spaces, tabsize);
+                        strcpy(tmpc + tabsize, c + 1);
+                        free(line);
+                        line = tmpLine;
+                        c = tmpc;
+                    }else{
+                        // move the string forward and add in the spaces where the tab was
+                        memmove(c + tabsize, c + 1, nread + line - c);
+                        memcpy(c, spaces, tabsize);
+                    }
+                    // count all tabsize spaces now
+                    nread += tabsize-1;
+                    int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize;
+                    visstrlen += tabAmount;
+                    cInc = tabAmount;
+                }else{
+                    // get the number of chars in the current multi-byte char
+                    cInc = mbrlen(c, nread + line - c, &state);
+                    // if it was an error then break
+                    if((cInc == (size_t)-1) || (cInc == (size_t)-2)){
+                        // TODO figure out error
+                        fprintf(stderr, "error: mbrlen = %zd\n", cInc);
+                        fprintf(stderr, "c: '%s', nread: %zd, line-c: %zd\n", c, nread, line-c);
                         break;
                     }
-                    visstrlen += inc;
+                    // get the current multi-byte char as a wchar
+                    wchar_t wcs[2] = L"";
+                    mbrtowc(wcs, c, cInc, &state);
+                    // get the width of the wide char to increment the visstrlen
+                    //int inc = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
+                    int inc = wcwidth(wcs[0]);
+                    //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cInc, inc, (int)cInc, c);
+                    if(i > 0){
+                        // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
+                        if(visstrlen + inc > width){
+                            break;
+                        }
+                        visstrlen += inc;
+                    }
                 }
-
+                // clear the prev color start pointer since we are currently dealing with actual output
+                prevColStart = c + cInc;
                 //fprintf(stderr, "%c: %d\n", *c, visstrlen);
             }else if(*c == 'm'){
                 // if c == m then ending color block, will start incrementing by width again
@@ -152,6 +161,7 @@ int main(const int argc, const char * const argv[]){
         }
         if(usedColor){
             // add color reset at end
+            c = prevColStart;
             if((size_t)(c - line + END_COL_LEN+1) > len){  // END_COL_LEN is the length of the color reset str
                 len += END_COL_LEN+1;
                 size_t tmpdist = c - line;
