@@ -99,27 +99,33 @@ int main(const int argc, const char * const argv[]){
                 if(*c == '\t'){
                     // if the char is a tab then add spaces manually
                     // if not enough room to just move the string then allocate more room
+                    //int tabAmount;
+                    //if(visstrlen + tabsize > width){
+                    //    tabAmount = width - visstrlen;
+                    //}else{
+                    //    tabAmount = tabsize - (visstrlen % tabsize);
+                    //}
+                    int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize - (visstrlen % tabsize);
                     if((size_t)(nread + tabsize) > len){
                         // not doing a realloc because i dont want to move the whole string and then have to move the end of the string again
                         // TODO try to check if we can actaully just make the buffer bigger and use the efficient form of realloc
                         // TODO maybe check how many tabs are left in the line so we can just allocate once for this line
-                        len += tabsize;
+                        len += tabAmount;
                         char * tmpLine = malloc(len);
                         memcpy(tmpLine, line, c - line);
                         char * tmpc = tmpLine + (c - line);
-                        memcpy(tmpc, spaces, tabsize);
-                        strcpy(tmpc + tabsize, c + 1);
+                        memcpy(tmpc, spaces, tabAmount);
+                        strcpy(tmpc + tabAmount, c + 1);
                         free(line);
                         line = tmpLine;
                         c = tmpc;
                     }else{
                         // move the string forward and add in the spaces where the tab was
-                        memmove(c + tabsize, c + 1, nread + line - c);
-                        memcpy(c, spaces, tabsize);
+                        memmove(c + tabAmount, c + 1, nread + line - c);
+                        memcpy(c, spaces, tabAmount);
                     }
-                    // count all tabsize spaces now
-                    nread += tabsize-1;
-                    int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize;
+                    // count all tabAmount spaces now
+                    nread += tabAmount-1;
                     visstrlen += tabAmount;
                     cInc = tabAmount;
                 }else{
