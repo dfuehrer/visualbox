@@ -1,0 +1,3 @@
+[submodule "clparser"]
+	path = clparser
+	url = git@github.com:dfuehrer/clparser.git
