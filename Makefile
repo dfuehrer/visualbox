@@ -1,13 +1,11 @@
 include config.mk
 
-SRC = visualbox.c
-OBJ = ${SRC:.c=.o}
+CFLAGS += -Wall -Wextra
 
-visualbox : ${OBJ}
-	$(CC) -o $@ ${OBJ}
+visualbox: clparser/process.o clparser/map.o
 
-.c.o:
-	${CC} -c ${CFLAGS} $< -Wall -Wextra
+clparser/%.o: clparser/*.[ch]
+	$(MAKE) -C clparser $(@F)
 
 PHONY : clean install
 
