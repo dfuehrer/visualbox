@@ -27,17 +27,17 @@ int main(const int argc, const char * const argv[]){
     int width, height;
     // use 4 spaces for tabs
     int tabsize = 4;
-    char * delim = "│";
+    const char * delim = "│";
     map_t params;
     map_t flags;
     initMap(&params);
     initMap(&flags);
-    addMapMembers(&flags , NULL,    BOOL, "sdsd", "help", 4, "h", 1);
-    //addMapMembers(&params, NULL,    STR, "sdsd", "file", 5, "f", 1);
-    addMapMembers(&params, NULL,    INT, "sdsdsd", "width", 5, "w", 1, "rows", 4);
-    addMapMembers(&params, NULL,    INT, "sdsdsd", "height", 6, "h", 1, "columns", 7);
-    addMapMembers(&params, &tabsize,INT, "sdsd", "tabs", 4, "t", 1);
-    addMapMembers(&params, delim,   STR, "sdsd", "delim", 5, "d", 1);
+    addMapMembers(&flags , NULL,    BOOL, false, "sdsd", "help", 4, "h", 1);
+    //addMapMembers(&params, NULL,    STR,  true,  "sdsd", "file", 5, "f", 1);
+    addMapMembers(&params, NULL,    INT,  false, "sdsdsd", "width", 5, "w", 1, "rows", 4);
+    addMapMembers(&params, NULL,    INT,  false, "sdsdsd", "height", 6, "h", 1, "columns", 7);
+    addMapMembers(&params, &tabsize,INT,  true,  "sdsd", "tabs", 4, "t", 1);
+    addMapMembers(&params, delim,   STR,  true,  "sdsd", "delim", 5, "d", 1);
     const char ** defaultValues;
     Errors e = parseArgs(argc, argv, &flags, &params, &defaultValues);
     if(e != Success){
@@ -70,8 +70,8 @@ int main(const int argc, const char * const argv[]){
     // TODO check if width and height given
     width   = getMapMember_int(&params, "width" , 5);
     height  = getMapMember_int(&params, "height", 6);
-    tabsize = getMapMember_int(&params, "tabs", 4);
-    delim   = getMapMemberData(&params, "delim", 5);
+    tabsize = getMapMember_int(&params, "tabs",   4);
+    delim   = getMapMemberData(&params, "delim",  5);
     // 2: out of width bounds error
     if((width < 1) || (height < 1)){
         fputs("Seriously, if you want to output nothing there are easier ways\n", stderr);
