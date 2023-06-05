@@ -8,7 +8,7 @@
 #include <wchar.h>
 #include <locale.h>
 
-#include "clparser/process.h"
+#include "clparser/parseargs.h"
 
 #define END_COL_LEN 4
 #define END_COL_STR ("\033[0m")
@@ -32,14 +32,14 @@ int main(const int argc, const char * const argv[]){
     map_t flags;
     initMap(&params);
     initMap(&flags);
-    addMapMembers(&flags , NULL,    BOOL, false, "sdsd", "help", 4, "h", 1);
-    //addMapMembers(&params, NULL,    STR,  true,  "sdsd", "file", 5, "f", 1);
-    addMapMembers(&params, NULL,    INT,  false, "sdsdsd", "width", 5, "w", 1, "rows", 4);
-    addMapMembers(&params, NULL,    INT,  false, "sdsdsd", "height", 6, "h", 1, "columns", 7);
-    addMapMembers(&params, &tabsize,INT,  true,  "sdsd", "tabs", 4, "t", 1);
-    addMapMembers(&params, delim,   STR,  true,  "sdsd", "delim", 5, "d", 1);
-    const char ** defaultValues;
-    Errors e = parseArgs(argc, argv, &flags, &params, &defaultValues);
+    addMapMembers(&flags , NULL,    BOOL, false, "Ssd",  STRVIEW("help"  ), "h", 1);
+    //addMapMembers(&params, NULL,    STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
+    addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("width" ), "w", 1, STRVIEW("rows"));
+    addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("height"), "h", 1, STRVIEW("columns"));
+    addMapMembers(&params, &tabsize,INT,  true,  "Ssd",  STRVIEW("tabs"  ), "t", 1);
+    addMapMembers(&params, delim,   STR,  true,  "Ssd",  STRVIEW("delim" ), "d", 1);
+    const char ** positionalArgs;
+    Errors e = parseArgs(argc-1, argv+1, &flags, &params, &positionalArgs);
     if(e != Success){
         fprintf(stderr, "error parsing clargs\n");
         return e;
@@ -49,29 +49,30 @@ int main(const int argc, const char * const argv[]){
         printUsage(&flags, &params, argv[0]);
         fprintf(stderr, "file taken as positional argument\n");
         printHelp(&flags, &params,
-                "help,width,height,tabs,delim",
-                "Print this help message",
-                "width of output (required)",
-                "height of output (required)",
-                "number of spaces per tab (optional, default 4)",
-                "delimeter to print at end of line (optional, default '│')"
+                "help = Print this help message\n\
+                width = width of output (required)\n\
+                height = height of output (required)\n\
+                tabs = number of spaces per tab (optional, default 4)\n\
+                delim = delimeter to print at end of line (optional, default '│')"
                 );
         return 1;
     }
-    if(defaultValues[0] == NULL || strcmp(defaultValues[0], "-") == 0){
+    if(positionalArgs[0] == NULL || strcmp(positionalArgs[0], "-") == 0){
         file = stdin;
     }else{
-        file = fopen(defaultValues[0], "r");
-        if(defaultValues[1] != NULL){
-            printf("using first file '%s', ignoring other arguments including '%s'\n", defaultValues[0], defaultValues[1]);
+        file = fopen(positionalArgs[0], "r");
+        if(positionalArgs[1] != NULL){
+            printf("using first file '%s', ignoring other arguments including '%s'\n", positionalArgs[0], positionalArgs[1]);
         }
     }
-    free(defaultValues);
+    free(positionalArgs);
     // TODO check if width and height given
     width   = getMapMember_int(&params, "width" , 5);
     height  = getMapMember_int(&params, "height", 6);
     tabsize = getMapMember_int(&params, "tabs",   4);
     delim   = getMapMemberData(&params, "delim",  5);
+    freeMap(&flags);
+    freeMap(&params);
     // 2: out of width bounds error
     if((width < 1) || (height < 1)){
         fputs("Seriously, if you want to output nothing there are easier ways\n", stderr);
@@ -79,6 +80,10 @@ int main(const int argc, const char * const argv[]){
             // if asked for no width then print out the number of empty lines asked for
             // TODO should also read through the buffer if piped in
             char * line = calloc(height, sizeof (char));
+            if(line == NULL){
+                perror("allocate line");
+                exit(EXIT_FAILURE);
+            }
             memset(line, '\n', height-1);
             line[height-1] = '\0';
             puts(line);
@@ -203,11 +208,12 @@ int main(const int argc, const char * const argv[]){
         }
         //fprintf(stderr, "width: %d\n", visstrlen);
 
+        // TODO if height > num lines in file, maybe pad with whitespace
+
         // i can just end it here but in odd circumstances that arent typical of the use of this program its faster to use memset so my hands were tied
         // its really not about wanting to do that from the start and just about speed in real use definitely dont doubt me
         //printf("%s%-*s|\n", line, width - visstrlen, "");
         //printf("%s%-*s%lc\n", line, width - visstrlen, "", L'│');
-        // TODO get the delim from clargs
         printf("%s%-*s%s\n", line, width - visstrlen, "", delim);
 
         // add spaces at end if missing room
@@ -218,7 +224,6 @@ int main(const int argc, const char * const argv[]){
         //    //wmemset(c, L' ', width - visstrlen + 2);
         //    memset(c, ' ', width - visstrlen);
         //}
-        //// TODO give options for if the bar at the end is there / what to use as the delimeter
         //// NOTE this might stick out past the end of the string
         ////strcpy(c + width - visstrlen, "│");
         ////printf("%s\n", line);

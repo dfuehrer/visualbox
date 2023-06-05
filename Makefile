@@ -2,9 +2,9 @@ include config.mk
 
 CFLAGS += -Wall -Wextra
 
-visualbox: clparser/process.o clparser/map.o
+visualbox: clparser/libparseargs.a
 
-clparser/%.o: clparser/*.[ch]
+clparser/libparseargs.a: clparser/*.[ch]
 	$(MAKE) -C clparser $(@F)
 
 PHONY : clean install
