@@ -13,21 +13,22 @@
 ## Usage
 - Usage:
 ```bash
-visualbox [file] width height
+visualbox [file] -w|--width width -h|--height height [-d|--delim delimeter] [-t|--tabs tabs]
 ```
 - if file is omitted, then `visualbox` will read from `stdin`
+- height and width are mandatory
+- delim is an arbitrary string (default to │)
+- tabs is an int of how many spaces tabs should amount to (default to 4)
 ### Use case
 - I created this to use in my [bat-minimap](https://github.com/dfuehrer/system-scripts/blob/main/bat-minimap) script
     - I use this script for previewing text files in `lf`
+
 ![demo](screenshot.png)
 
 ## Building
+- relies on clparser submodule
+    - builds statically against clparser/libparseargs.a
 - build with `make(1)`
 - install with `make install`
-    - installs locally to ~/.local/bin by defualt
+    - installs locally to ~/.local/bin by default
     - tweak the directories in config.mk to choose where it gets installed
-
-## TODO
-- [ ] add options:
-    - [ ] delimiter at the end of lines
-    - [ ] tab width
