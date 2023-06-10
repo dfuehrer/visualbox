@@ -33,37 +33,42 @@ int main(const int argc, const char * const argv[]){
     initMap(&params);
     initMap(&flags);
     addMapMembers(&flags , NULL,    BOOL, false, "Ssd",  STRVIEW("help"  ), "h", 1);
-    //addMapMembers(&params, NULL,    STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
-    addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("width" ), "w", 1, STRVIEW("rows"));
-    addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("height"), "h", 1, STRVIEW("columns"));
+    MapData * widthNode  = addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("width" ), "w", 1, STRVIEW("rows"));
+    MapData * heightNode = addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("height"), "h", 1, STRVIEW("columns"));
     addMapMembers(&params, &tabsize,INT,  true,  "Ssd",  STRVIEW("tabs"  ), "t", 1);
     addMapMembers(&params, delim,   STR,  true,  "Ssd",  STRVIEW("delim" ), "d", 1);
+    MapData * fileNode = addMapMembers(&params, "-",     STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
+    MapData * positionalNodes[] = {
+        fileNode,
+        //widthNode,
+        //heightNode,
+        NULL,
+    };
     const char ** positionalArgs;
-    Errors e = parseArgs(argc-1, argv+1, &flags, &params, &positionalArgs);
+    Errors e = parseArgs(argc-1, argv+1, &flags, &params, positionalNodes, &positionalArgs, false);
     if(e != Success){
         fprintf(stderr, "error parsing clargs\n");
         return e;
     }
     bool help = getMapMember_bool(&flags, "help", 4);
     if(help){
-        printUsage(&flags, &params, argv[0]);
+        printUsage(&flags, &params, (const MapData **)positionalNodes, argv[0]);
         fprintf(stderr, "file taken as positional argument\n");
-        printHelp(&flags, &params,
+        printHelp(&flags, &params, (const MapData **)positionalNodes,
                 "help = Print this help message\n\
+                file = file to output (default stdin)\n\
                 width = width of output (required)\n\
                 height = height of output (required)\n\
-                tabs = number of spaces per tab (optional, default 4)\n\
-                delim = delimeter to print at end of line (optional, default '│')"
+                tabs = number of spaces per tab\n\
+                delim = delimeter to print at end of line"
                 );
         return 1;
     }
-    if(positionalArgs[0] == NULL || strcmp(positionalArgs[0], "-") == 0){
+    const char * filename = getMapMemberData(&params, "file", 4);
+    if(strcmp(filename, "-") == 0){
         file = stdin;
     }else{
-        file = fopen(positionalArgs[0], "r");
-        if(positionalArgs[1] != NULL){
-            printf("using first file '%s', ignoring other arguments including '%s'\n", positionalArgs[0], positionalArgs[1]);
-        }
+        file = fopen(filename, "r");
     }
     free(positionalArgs);
     // TODO check if width and height given
