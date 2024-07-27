@@ -2,10 +2,14 @@ include config.mk
 
 CFLAGS += -Wall -Wextra
 
-visualbox: clparser/libparseargs.a
+visualbox: clparser/libparseargs.a libgrapheme/libgrapheme.a
 
 clparser/libparseargs.a: clparser/*.[ch]
-	$(MAKE) -C clparser $(@F)
+	$(MAKE) -C $(@D) $(@F)
+
+libgrapheme/libgrapheme.a:
+	./$(@D)/configure
+	$(MAKE) -C $(@D) $(@F)
 
 PHONY : clean install
 
