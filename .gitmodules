@@ -1,3 +1,6 @@
 [submodule "clparser"]
 	path = clparser
 	url = git@github.com:dfuehrer/clparser.git
+[submodule "libgrapheme"]
+	path = libgrapheme
+	url = https://git.suckless.org/libgrapheme
