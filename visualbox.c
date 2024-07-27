@@ -1,17 +1,20 @@
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE       /* See feature_test_macros(7) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#define _XOPEN_SOURCE       /* See feature_test_macros(7) */
-#define __USE_XOPEN
+#include <sys/types.h>
 // TODO maybe use libgrapheme from suckless if its better for finding how many chars there are
 #include <wchar.h>
 #include <locale.h>
 
 #include "clparser/parseargs.h"
+#include "libgrapheme/grapheme.h"
 
-#define END_COL_LEN 4
-#define END_COL_STR ("\033[0m")
+#define END_COL_STR  ("\033[0m")
+#define END_COL_SIZE (sizeof END_COL_STR)
+#define END_COL_LEN  (END_COL_SIZE - 1)
 
 
 // cut out a box width by height from stdin
@@ -40,8 +43,8 @@ int main(const int argc, const char * const argv[]){
     MapData * fileNode = addMapMembers(&params, "-",     STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
     MapData * positionalNodes[] = {
         fileNode,
-        //widthNode,
-        //heightNode,
+        widthNode,
+        heightNode,
         NULL,
     };
     const char ** positionalArgs;
@@ -81,6 +84,7 @@ int main(const int argc, const char * const argv[]){
     // 2: out of width bounds error
     if((width < 1) || (height < 1)){
         fputs("Seriously, if you want to output nothing there are easier ways\n", stderr);
+        // TODO this is dumb because it doesnt check how long the output is and doesnt output the delimeter
         if(height > 0){
             // if asked for no width then print out the number of empty lines asked for
             // TODO should also read through the buffer if piped in
@@ -107,7 +111,7 @@ int main(const int argc, const char * const argv[]){
     // TODO use wcswidth to find the width at the end
     //  this will require having a separate array so i can remove all control chars / non-printing chars, may be a pain
     int visstrlen = 0;
-    int increment = 1;
+    bool increment = true;
 
     // start by allocating the bare minimum size
     char * c = NULL;
@@ -122,14 +126,15 @@ int main(const int argc, const char * const argv[]){
         //fprintf(stderr, "line: %d (read %zd)\n", i, nread);
         size_t cInc = 1;
         bool usedColor = false;
-        increment = 1;
+        increment = true;
         visstrlen = 0;
         for(c = prevColStart = line; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
-            if(*c == '\033'){
+            if(*c == '\033' && c[1] == '['){
+                // TODO check that this is actually a color and not some other type of thing
                 // if c == \033 then starting color info, doesnt add to width
-                increment = 0;
+                increment = false;
                 usedColor = true;
-                cInc = 1;
+                cInc = 2;
                 // save the place of the last unresolved color change to not add it to the output
                 //  (we clear this if we get something to print or a full color reset so we dont actually have to set it here)
                 //prevColStart = c;
@@ -161,36 +166,47 @@ int main(const int argc, const char * const argv[]){
                     visstrlen += tabAmount;
                     cInc = tabAmount;
                 }else{
-                    // get the number of chars in the current multi-byte char
-                    cInc = mbrlen(c, nread + line - c, &state);
-                    // if it was an error then break
-                    if((cInc == (size_t)-1) || (cInc == (size_t)-2)){
-                        // TODO figure out error
-                        fprintf(stderr, "error: mbrlen = %zd\n", cInc);
-                        fprintf(stderr, "c: '%s', nread: %zd, line-c: %zd\n", c, nread, line-c);
-                        break;
-                    }
-                    // get the current multi-byte char as a wchar
-                    wchar_t wcs[2] = L"";
-                    mbrtowc(wcs, c, cInc, &state);
-                    // get the width of the wide char to increment the visstrlen
-                    //int inc = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
-                    int inc = wcwidth(wcs[0]);
-                    //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cInc, inc, (int)cInc, c);
-                    if(i > 0){
-                        // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
-                        if(visstrlen + inc > width){
+                    cInc = grapheme_next_character_break_utf8(c, nread + line - c);
+                    fprintf(stderr, "1 char: '%.*s' (%zu bytes)\n", (int) cInc, c, cInc);
+                    size_t j;
+                    size_t jInc = 0;
+                    int incWidth = 0;
+                    for(j = 0; j < cInc; j += jInc){
+                        // get the number of chars in the current multi-byte char (code point)
+                        jInc = mbrlen(c + j, nread + line - c - j, &state);
+                        // if it was an error then break
+                        if((jInc == (size_t)-1) || (jInc == (size_t)-2)){
+                            // TODO figure out error
+                            fprintf(stderr, "error: mbrlen = %zd\n", jInc);
+                            fprintf(stderr, "c: '%s', nread: %zd, line-c: %zd\n", c+j, nread, line-c-j);
                             break;
                         }
-                        visstrlen += inc;
+                        // get the current multi-byte char as a wchar
+                        wchar_t wcs[2] = L"";
+                        mbrtowc(wcs, c+j, jInc, &state);
+                        // get the width of the wide char to increment the visstrlen
+                        //int cWidth = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
+                        int cWidth = wcwidth(wcs[0]);
+                        fprintf(stderr, "char '%.*s' width: %d\n", (int) jInc, c+j, cWidth);
+                        incWidth += cWidth;
+                        //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cInc, cWidth, (int)cInc, c);
+                        // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
+                        if(visstrlen + incWidth > width){
+                            break;
+                        }
                     }
+                    // if didnt finish loop above then break out of this loop too
+                    if(j < cInc){
+                        break;
+                    }
+                    visstrlen += incWidth;
                 }
                 // clear the prev color start pointer since we are currently dealing with actual output
                 prevColStart = c + cInc;
                 //fprintf(stderr, "%c: %d\n", *c, visstrlen);
             }else if(*c == 'm'){
                 // if c == m then ending color block, will start incrementing by width again
-                increment = 1;
+                increment = true;
                 if(!strncmp(c - (END_COL_LEN-1), END_COL_STR, END_COL_LEN)){
                     // if this is just ending a color reset str then mark as no color used
                     usedColor = false;
@@ -200,13 +216,13 @@ int main(const int argc, const char * const argv[]){
         if(usedColor){
             // add color reset at end
             c = prevColStart;
-            if((size_t)(c - line + END_COL_LEN+1) > len){  // END_COL_LEN is the length of the color reset str
-                len += END_COL_LEN+1;
+            if((size_t)(c - line + END_COL_SIZE) > len){  // END_COL_SIZE is the length of the color reset str
+                len += END_COL_SIZE;
                 size_t tmpdist = c - line;
                 line = (char *)realloc(line, len);
                 c = line + tmpdist;
             }
-            memcpy(c, END_COL_STR, END_COL_LEN + 1);
+            memcpy(c, END_COL_STR, END_COL_SIZE);
             //strcpy(c, END_COL_STR);
         }else{
             *c = '\0';
