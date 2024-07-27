@@ -16,6 +16,26 @@
 #define END_COL_SIZE (sizeof END_COL_STR)
 #define END_COL_LEN  (END_COL_SIZE - 1)
 
+//#define DEBUG_MESSAGES
+#ifdef DEBUG_MESSAGES
+#   define DEBUGF(...) fprintf(stderr, __VA_ARGS__)
+#else
+#   define DEBUGF(...) 
+#endif  // DEBUG_MESSAGES
+
+#define WARN_MESSAGES
+#ifdef WARN_MESSAGES
+#   define WARNF(...) fprintf(stderr, __VA_ARGS__)
+#else
+#   define WARNF(...) 
+#endif  // WARN_MESSAGES
+
+#define ERROR_MESSAGES
+#ifdef ERROR_MESSAGES
+#   define ERRORF(...) fprintf(stderr, __VA_ARGS__)
+#else
+#   define ERRORF(...) 
+#endif  // ERROR_MESSAGES
 
 // cut out a box width by height from stdin
 // dont count ansi color codes, so the box is visually width by height
@@ -31,6 +51,7 @@ int main(const int argc, const char * const argv[]){
     // use 4 spaces for tabs
     int tabsize = 4;
     const char * delim = "│";
+    bool clust = false;
     map_t params;
     map_t flags;
     initMap(&params);
@@ -40,6 +61,10 @@ int main(const int argc, const char * const argv[]){
     MapData * heightNode = addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("height"), "h", 1, STRVIEW("columns"));
     addMapMembers(&params, &tabsize,INT,  true,  "Ssd",  STRVIEW("tabs"  ), "t", 1);
     addMapMembers(&params, delim,   STR,  true,  "Ssd",  STRVIEW("delim" ), "d", 1);
+#ifndef NO_LIBGRAPHEME
+    // TODO add option to tell it not to try mode 2027
+    addMapMembers(&flags , NULL,    BOOL, false, "SS",   STRVIEW("force-cluster" ), STRVIEW("f"));
+#endif // NO_LIBGRAPHEME
     MapData * fileNode = addMapMembers(&params, "-",     STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
     MapData * positionalNodes[] = {
         fileNode,
@@ -50,20 +75,24 @@ int main(const int argc, const char * const argv[]){
     const char ** positionalArgs;
     Errors e = parseArgs(argc-1, argv+1, &flags, &params, positionalNodes, &positionalArgs, false);
     if(e != Success){
-        fprintf(stderr, "error parsing clargs\n");
+        ERRORF("error parsing clargs\n");
         return e;
     }
     bool help = getMapMember_bool(&flags, "help", 4);
     if(help){
         printUsage(&flags, &params, (const MapData **)positionalNodes, argv[0]);
         fprintf(stderr, "file taken as positional argument\n");
+        // TODO probably don't use this help printing function cause it's honestly not that helpful and it has an issue with the width of the default delim which just is dumb for an application that should be able to handle stuff
         printHelp(&flags, &params, (const MapData **)positionalNodes,
-                "help = Print this help message\n\
-                file = file to output (default stdin)\n\
-                width = width of output (required)\n\
-                height = height of output (required)\n\
-                tabs = number of spaces per tab\n\
-                delim = delimeter to print at end of line"
+                "help = Print this help message\n"
+                "file = file to output (default stdin)\n"
+                "width = width of output (required)\n"
+                "height = height of output (required)\n"
+                "tabs = number of spaces per tab\n"
+                "delim = delimeter to print at end of line\n"
+#ifndef NO_LIBGRAPHEME
+                "force-cluster = force length to clustered grapheme\n"
+#endif // NO_LIBGRAPHEME
                 );
         return 1;
     }
@@ -75,10 +104,15 @@ int main(const int argc, const char * const argv[]){
     }
     free(positionalArgs);
     // TODO check if width and height given
-    width   = getMapMember_int(&params, "width" , 5);
-    height  = getMapMember_int(&params, "height", 6);
-    tabsize = getMapMember_int(&params, "tabs",   4);
-    delim   = getMapMemberData(&params, "delim",  5);
+    //width   = getMapMember_int(&params, STR_LEN("width" ));
+    //height  = getMapMember_int(&params, STR_LEN("height"));
+    width   = *(const int *) widthNode ->data.ptr;
+    height  = *(const int *) heightNode->data.ptr;
+    tabsize = getMapMember_int(&params, STR_LEN("tabs"  ));
+    delim   = getMapMemberData(&params, STR_LEN("delim" ));
+#ifndef NO_LIBGRAPHEME
+    clust   = getMapMember_bool(&flags, STR_LEN("force-cluster"));
+#endif // NO_LIBGRAPHEME
     freeMap(&flags);
     freeMap(&params);
     // 2: out of width bounds error
@@ -100,14 +134,12 @@ int main(const int argc, const char * const argv[]){
         }
         return 2;
     }
+    printf("\033[?2027$p");
     char *locale;
     locale = setlocale(LC_ALL, "");
     (void) locale;
 
-    //printf("stdout orientation:\t%d\n", fwide(stdout, 0));
-    //printf("stdin orientation:\t%d\n", fwide(stdin, 1));
-
-    //fprintf(stderr, "converting to a width of %d and a height of %d\n", width, height);
+    DEBUGF("converting to a width of %d and a height of %d\n", width, height);
     // TODO use wcswidth to find the width at the end
     //  this will require having a separate array so i can remove all control chars / non-printing chars, may be a pain
     int visstrlen = 0;
@@ -123,7 +155,7 @@ int main(const int argc, const char * const argv[]){
     mbstate_t state = {0};
     int i = 1;
     for(int lineno = 0; lineno < height && ((nread = getline(&line, &len, file)) != -1); ++lineno){
-        //fprintf(stderr, "line: %d (read %zd)\n", i, nread);
+        //DEBUGF("line: %d (read %zd)\n", i, nread);
         size_t cInc = 1;
         bool usedColor = false;
         increment = true;
@@ -166,8 +198,12 @@ int main(const int argc, const char * const argv[]){
                     visstrlen += tabAmount;
                     cInc = tabAmount;
                 }else{
-                    cInc = grapheme_next_character_break_utf8(c, nread + line - c);
-                    fprintf(stderr, "1 char: '%.*s' (%zu bytes)\n", (int) cInc, c, cInc);
+#                   ifndef NO_LIBGRAPHEME
+                        cInc = grapheme_next_character_break_utf8(c, nread + line - c);
+                        DEBUGF("1 char: '%.*s' (%zu bytes)\n", (int) cInc, c, cInc);
+#                   else
+                        cInc = 1;
+#                   endif   // NO_LIBGRAPHEME
                     size_t j;
                     size_t jInc = 0;
                     int incWidth = 0;
@@ -177,8 +213,8 @@ int main(const int argc, const char * const argv[]){
                         // if it was an error then break
                         if((jInc == (size_t)-1) || (jInc == (size_t)-2)){
                             // TODO figure out error
-                            fprintf(stderr, "error: mbrlen = %zd\n", jInc);
-                            fprintf(stderr, "c: '%s', nread: %zd, line-c: %zd\n", c+j, nread, line-c-j);
+                            ERRORF("error: mbrlen = %zd\n", jInc);
+                            ERRORF("c: '%s', nread: %zd, line-c: %zd\n", c+j, nread, line-c-j);
                             break;
                         }
                         // get the current multi-byte char as a wchar
@@ -187,9 +223,19 @@ int main(const int argc, const char * const argv[]){
                         // get the width of the wide char to increment the visstrlen
                         //int cWidth = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
                         int cWidth = wcwidth(wcs[0]);
-                        fprintf(stderr, "char '%.*s' width: %d\n", (int) jInc, c+j, cWidth);
-                        incWidth += cWidth;
-                        //fprintf(stderr, "chars: %zd, width: %d, str: '%*s'\n", cInc, cWidth, (int)cInc, c);
+                        DEBUGF("char '%.*s' width: %d (%zu bytes)\n", (int) jInc, c+j, cWidth, jInc);
+                        if(cWidth >= 0){
+                            if(clust){
+                                if(cWidth > incWidth){
+                                    incWidth = cWidth;
+                                }
+                            }else{
+                                incWidth += cWidth;
+                            }
+                        }else{
+                            WARNF("char '%.*s' (%zu len) unprintable\n", (int) jInc, c+j, jInc);
+                        }
+                        //DEBUGF("chars: %zd, width: %d, str: '%*s'\n", cInc, cWidth, (int)cInc, c);
                         // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
                         if(visstrlen + incWidth > width){
                             break;
@@ -198,12 +244,20 @@ int main(const int argc, const char * const argv[]){
                     // if didnt finish loop above then break out of this loop too
                     if(j < cInc){
                         break;
+                    }else if(j > cInc){
+#                       ifndef NO_LIBGRAPHEME
+                            ERRORF("error: libgrapheme grapheme cluster length and mbrlen disagree: %zu vs %zu, using mbrlen\n", cInc, j);
+#                       endif // NO_LIBGRAPHEME
+                        cInc = j;
                     }
+//#                   ifdef NO_LIBGRAPHEME
+//                        cInc = j;
+//#                   endif
                     visstrlen += incWidth;
                 }
                 // clear the prev color start pointer since we are currently dealing with actual output
                 prevColStart = c + cInc;
-                //fprintf(stderr, "%c: %d\n", *c, visstrlen);
+                //DEBUGF("%c: %d\n", *c, visstrlen);
             }else if(*c == 'm'){
                 // if c == m then ending color block, will start incrementing by width again
                 increment = true;
@@ -227,7 +281,7 @@ int main(const int argc, const char * const argv[]){
         }else{
             *c = '\0';
         }
-        //fprintf(stderr, "width: %d\n", visstrlen);
+        //DEBUGF("width: %d\n", visstrlen);
 
         // TODO if height > num lines in file, maybe pad with whitespace
 
