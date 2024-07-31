@@ -4,6 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#ifndef NO_LIBGRAPHEME
+#include <assert.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <termios.h>
+#include <fcntl.h>
+#endif  // NO_LIBGRAPHEME
 #include <sys/types.h>
 // TODO maybe use libgrapheme from suckless if its better for finding how many chars there are
 #include <wchar.h>
@@ -37,6 +44,23 @@
 #   define ERRORF(...) 
 #endif  // ERROR_MESSAGES
 
+#ifndef __USE_MISC
+static void cfmakeraw(struct termios *termios_p);
+#endif  // __USE_MISC
+
+#ifndef NO_LIBGRAPHEME
+typedef enum {
+    DEC_UNKNOWN   = '0',
+    DEC_SET       = '1',
+    DEC_RESET     = '2',
+    DEC_PERMSET   = '3',
+    DEC_PERMRESET = '4',
+} DEC_RESPONSE;
+
+void chrError(char expected, char got);
+DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen);
+#endif  // NO_LIBGRAPHEME
+
 // cut out a box width by height from stdin
 // dont count ansi color codes, so the box is visually width by height
 // add spaces so that you can paste something on the end in a nice column
@@ -52,6 +76,7 @@ int main(const int argc, const char * const argv[]){
     int tabsize = 4;
     const char * delim = "│";
     bool clust = false;
+    bool no_2027 = false;
     map_t params;
     map_t flags;
     initMap(&params);
@@ -64,6 +89,7 @@ int main(const int argc, const char * const argv[]){
 #ifndef NO_LIBGRAPHEME
     // TODO add option to tell it not to try mode 2027
     addMapMembers(&flags , NULL,    BOOL, false, "SS",   STRVIEW("force-cluster" ), STRVIEW("f"));
+    addMapMembers(&flags , NULL,    BOOL, false, "SS",   STRVIEW("no-mode-2027"  ), STRVIEW("N"));
 #endif // NO_LIBGRAPHEME
     MapData * fileNode = addMapMembers(&params, "-",     STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
     MapData * positionalNodes[] = {
@@ -92,6 +118,7 @@ int main(const int argc, const char * const argv[]){
                 "delim = delimeter to print at end of line\n"
 #ifndef NO_LIBGRAPHEME
                 "force-cluster = force length to clustered grapheme\n"
+                "no-mode-2027 = don't check if terminal can use clustering\n"
 #endif // NO_LIBGRAPHEME
                 );
         return 1;
@@ -104,14 +131,15 @@ int main(const int argc, const char * const argv[]){
     }
     free(positionalArgs);
     // TODO check if width and height given
-    //width   = getMapMember_int(&params, STR_LEN("width" ));
-    //height  = getMapMember_int(&params, STR_LEN("height"));
-    width   = *(const int *) widthNode ->data.ptr;
-    height  = *(const int *) heightNode->data.ptr;
+    width   = getNode_int( widthNode);
+    height  = getNode_int(heightNode);
     tabsize = getMapMember_int(&params, STR_LEN("tabs"  ));
     delim   = getMapMemberData(&params, STR_LEN("delim" ));
 #ifndef NO_LIBGRAPHEME
     clust   = getMapMember_bool(&flags, STR_LEN("force-cluster"));
+    no_2027 = getMapMember_bool(&flags, STR_LEN("no-mode-2027"));
+#else
+    no_2027 = true;
 #endif // NO_LIBGRAPHEME
     freeMap(&flags);
     freeMap(&params);
@@ -134,7 +162,73 @@ int main(const int argc, const char * const argv[]){
         }
         return 2;
     }
-    printf("\033[?2027$p");
+
+#ifndef NO_LIBGRAPHEME
+    if(!no_2027 && !clust){
+        //printf("\033[?2027$p");
+        struct termios cur_tios = {0};
+        struct termios raw_tios;
+        int stdin_fd = STDIN_FILENO;
+        if(!isatty(stdin_fd)){
+            stdin_fd = STDOUT_FILENO;
+            if(!isatty(stdin_fd)){
+                stdin_fd = STDERR_FILENO;
+                if(!isatty(stdin_fd)){
+                    goto skip_checkterm;
+                }
+            }
+        }
+        stdin_fd = open(ttyname(stdin_fd), O_RDWR);
+        //stdin_fd = open(ctermid(NULL), O_RDWR);
+        if(stdin_fd < 0){
+            goto skip_checkterm;
+        }
+        //write(STDOUT_FILENO, STR_LEN("\033[?2027$p"));
+        //fflush(stdout);
+        int ret = tcgetattr(stdin_fd, &cur_tios);
+        if(ret != 0){
+            goto skip_checkterm;
+        }
+        raw_tios = cur_tios;
+        cfmakeraw(&raw_tios);
+        ret = tcsetattr(stdin_fd, TCSANOW, &raw_tios);
+        // TODO check that things set properly
+        if(ret != 0){
+            goto skip_checkterm;
+        }
+        write(stdin_fd, STR_LEN("\033[?2027$p"));
+        char response = readDECResponse(stdin_fd, STR_LEN("2027"));
+        //printf("got response: '%c'\n", response);
+        if(response == DEC_SET || response == DEC_PERMSET){
+            clust = true;
+        }else if(response == DEC_RESET){
+            // try to set clustering
+            //write(STDOUT_FILENO, STR_LEN("\033[?2027h"));
+            write(stdin_fd, STR_LEN("\033[?2027h"));
+            write(stdin_fd, STR_LEN("\033[?2027$p"));
+            response = readDECResponse(stdin_fd, STR_LEN("2027"));
+            if(response == DEC_SET || response == DEC_PERMSET){
+                clust = true;
+            }else{
+                WARNF("tried to set mode 2027 for clustering but it failed (got '%c' response)\n", response);
+            }
+        }
+        ret = tcsetattr(stdin_fd, TCSANOW, &cur_tios);
+        // TODO check that things set properly
+
+skip_checkterm:
+        if(memcmp(&cur_tios, &raw_tios, sizeof cur_tios) != 0){
+            ret = tcsetattr(stdin_fd, TCSANOW, &cur_tios);
+            if(ret != 0){
+                // TODO do something
+            }
+        }
+        if(stdin_fd != STDIN_FILENO){
+            close(stdin_fd);
+        }
+    }
+#endif // NO_LIBGRAPHEME
+
     char *locale;
     locale = setlocale(LC_ALL, "");
     (void) locale;
@@ -308,3 +402,83 @@ int main(const int argc, const char * const argv[]){
     free(line);
     return 0;
 }
+
+#ifndef NO_LIBGRAPHEME
+inline void chrError(char expected, char got){
+    WARNF("error, expected '");
+    if(isprint(expected)){
+        WARNF("%c", expected);
+    }else{
+        WARNF("\\%03o", expected);
+    }
+    WARNF("' but got '");
+    if(isprint(got)){
+        WARNF("%c", got);
+    }else{
+        WARNF("\\%03o", got);
+    }
+    WARNF("'\n");
+}
+
+DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen){
+    assert(modelen < 10);
+    // "\033[?" *mode* ";" *response* "$y"
+#   define RESPONSE_BASE_LEN  (3 + 1 + 2)
+    char buf[10+10];
+    read(fd, buf, RESPONSE_BASE_LEN + 1 + modelen);
+    size_t i = 0;
+    if(buf[i++] != '\033') {
+        chrError('\033', buf[i-1]);
+        return DEC_UNKNOWN;
+    }
+    if(buf[i++] != '[')    {
+        chrError('[', buf[i-1]);
+        return DEC_UNKNOWN;
+    }
+    if(buf[i++] != '?')    {
+        chrError('?', buf[i-1]);
+        return DEC_UNKNOWN;
+    }
+    for(size_t j = 0; j < modelen; ++j){
+        if(buf[i++] != mode[j]){
+            chrError(mode[j], buf[i-1]);
+            return DEC_UNKNOWN;
+        }
+    }
+    if(buf[i++] != ';')    {
+        chrError(';', buf[i-1]);
+        return DEC_UNKNOWN;
+    }
+    char response = buf[i++];
+    if(response < DEC_UNKNOWN || response > DEC_PERMRESET) {
+        WARNF("error, invalid response '");
+        if(isprint(response)){
+            WARNF("%c", response);
+        }else{
+            WARNF("\\%03o", response);
+        }
+        WARNF("' (expected something between %c and %c)\n", DEC_UNKNOWN, DEC_PERMRESET);
+        return DEC_UNKNOWN;
+    }
+    if(buf[i++] != '$')    {
+        chrError('$', buf[i-1]);
+        return DEC_UNKNOWN;
+    }
+    if(buf[i++] != 'y')    {
+        chrError('y', buf[i-1]);
+        return DEC_UNKNOWN;
+    }
+    return response;
+}
+
+#ifndef __USE_MISC
+static inline void cfmakeraw(struct termios *termios_p){
+    termios_p->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
+            | INLCR | IGNCR | ICRNL | IXON);
+    termios_p->c_oflag &= ~OPOST;
+    termios_p->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    termios_p->c_cflag &= ~(CSIZE | PARENB);
+    termios_p->c_cflag |= CS8;
+}
+#endif  // __USE_MISC
+#endif  // NO_LIBGRAPHEME
