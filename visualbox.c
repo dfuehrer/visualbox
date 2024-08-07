@@ -4,15 +4,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#ifndef NO_LIBGRAPHEME
 #include <assert.h>
 #include <ctype.h>
+#ifndef NO_LIBGRAPHEME
+#include <errno.h>
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
 #endif  // NO_LIBGRAPHEME
 #include <sys/types.h>
-// TODO maybe use libgrapheme from suckless if its better for finding how many chars there are
 #include <wchar.h>
 #include <locale.h>
 
@@ -44,11 +44,13 @@
 #   define ERRORF(...) 
 #endif  // ERROR_MESSAGES
 
+#define TODO(MSG)   assert(false && MSG);
+
+#ifndef NO_LIBGRAPHEME
 #ifndef __USE_MISC
 static void cfmakeraw(struct termios *termios_p);
 #endif  // __USE_MISC
 
-#ifndef NO_LIBGRAPHEME
 typedef enum {
     DEC_UNKNOWN   = '0',
     DEC_SET       = '1',
@@ -57,9 +59,11 @@ typedef enum {
     DEC_PERMRESET = '4',
 } DEC_RESPONSE;
 
-void chrError(char expected, char got);
+static void chrError(char expected, char got);
 DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen);
 #endif  // NO_LIBGRAPHEME
+
+static void debug_v(char str[]);
 
 // cut out a box width by height from stdin
 // dont count ansi color codes, so the box is visually width by height
@@ -109,18 +113,30 @@ int main(const int argc, const char * const argv[]){
         printUsage(&flags, &params, (const MapData **)positionalNodes, argv[0]);
         fprintf(stderr, "file taken as positional argument\n");
         // TODO probably don't use this help printing function cause it's honestly not that helpful and it has an issue with the width of the default delim which just is dumb for an application that should be able to handle stuff
-        printHelp(&flags, &params, (const MapData **)positionalNodes,
-                "help = Print this help message\n"
-                "file = file to output (default stdin)\n"
-                "width = width of output (required)\n"
-                "height = height of output (required)\n"
-                "tabs = number of spaces per tab\n"
-                "delim = delimeter to print at end of line\n"
+        //printHelp(&flags, &params, (const MapData **)positionalNodes,
+        //        "help = Print this help message\n"
+        //        "file = file to output (default stdin)\n"
+        //        "width = width of output (required)\n"
+        //        "height = height of output (required)\n"
+        //        "tabs = number of spaces per tab\n"
+        //        "delim = delimeter to print at end of line\n"
+        //        #ifndef NO_LIBGRAPHEME
+        //        "force-cluster = force length to clustered grapheme\n"
+        //        "no-mode-2027 = don't check if terminal can use clustering\n"
+        //        #endif // NO_LIBGRAPHEME
+        //        );
+        fprintf(stderr,
+                "\t[ --help|-h ]                                    Print this help message\n"
+                "\t[ --file|-f file = - ]                           file to output (default stdin)\n"
+                "\t--width|-w|--rows rows                           width of output (required)\n"
+                "\t--height|-h|--columns columns                    height of output (required)\n"
+                "\t[ --tabs|-t tabs = %d ]                           number of spaces per tab\n"
+                "\t[ --delim|-d delim = %s ]                         delimeter to print at end of line\n"
 #ifndef NO_LIBGRAPHEME
-                "force-cluster = force length to clustered grapheme\n"
-                "no-mode-2027 = don't check if terminal can use clustering\n"
+                "\t[ --force-cluster|-f ]                           force length to clustered grapheme\n"
+                "\t[ --no-mode-2027|-N ]                            don't check if terminal can use clustering\n"
 #endif // NO_LIBGRAPHEME
-                );
+                , tabsize, delim);
         return 1;
     }
     const char * filename = getMapMemberData(&params, "file", 4);
@@ -140,6 +156,7 @@ int main(const int argc, const char * const argv[]){
     no_2027 = getMapMember_bool(&flags, STR_LEN("no-mode-2027"));
 #else
     no_2027 = true;
+    (void) no_2027;
 #endif // NO_LIBGRAPHEME
     freeMap(&flags);
     freeMap(&params);
@@ -164,8 +181,12 @@ int main(const int argc, const char * const argv[]){
     }
 
 #ifndef NO_LIBGRAPHEME
+    // TODO speed up the mode 2027 logic, it seems to be pretty slow on some terminals
+    // try using mode 2027 if supported
+    // - mode 2027 is a proposed spec implemented by a few niche terminals to set whether fancy clustered characters should be used
+    //  - fancy clustering is nice but many apps assume they can just use mbrlen and wcswidth so they get out of sync with the terminal
+    //  - this mode lets clustering be available to apps that can handle it while defaulting to a safer option for most apps
     if(!no_2027 && !clust){
-        //printf("\033[?2027$p");
         struct termios cur_tios = {0};
         struct termios raw_tios;
         int stdin_fd = STDIN_FILENO;
@@ -174,6 +195,7 @@ int main(const int argc, const char * const argv[]){
             if(!isatty(stdin_fd)){
                 stdin_fd = STDERR_FILENO;
                 if(!isatty(stdin_fd)){
+                    DEBUGF("std in, out, and err not connected to terminal, not setting terminal props\n");
                     goto skip_checkterm;
                 }
             }
@@ -181,12 +203,12 @@ int main(const int argc, const char * const argv[]){
         stdin_fd = open(ttyname(stdin_fd), O_RDWR);
         //stdin_fd = open(ctermid(NULL), O_RDWR);
         if(stdin_fd < 0){
+            DEBUGF("error opening term file '%s' for fd %d: %s\n", ttyname(stdin_fd), stdin_fd, strerror(errno));
             goto skip_checkterm;
         }
-        //write(STDOUT_FILENO, STR_LEN("\033[?2027$p"));
-        //fflush(stdout);
         int ret = tcgetattr(stdin_fd, &cur_tios);
         if(ret != 0){
+            DEBUGF("error getting terminal props: %s\n", strerror(errno));
             goto skip_checkterm;
         }
         raw_tios = cur_tios;
@@ -194,18 +216,21 @@ int main(const int argc, const char * const argv[]){
         ret = tcsetattr(stdin_fd, TCSANOW, &raw_tios);
         // TODO check that things set properly
         if(ret != 0){
+            DEBUGF("error setting terminal props: %s\n", strerror(errno));
             goto skip_checkterm;
         }
-        write(stdin_fd, STR_LEN("\033[?2027$p"));
+#define REQUEST_2027    "\033[?2027$p"
+#define SET_2027        "\033[?2027h"
+        // request if mode 2027 is set
+        write(stdin_fd, STR_LEN(REQUEST_2027));
         char response = readDECResponse(stdin_fd, STR_LEN("2027"));
         //printf("got response: '%c'\n", response);
         if(response == DEC_SET || response == DEC_PERMSET){
             clust = true;
         }else if(response == DEC_RESET){
             // try to set clustering
-            //write(STDOUT_FILENO, STR_LEN("\033[?2027h"));
-            write(stdin_fd, STR_LEN("\033[?2027h"));
-            write(stdin_fd, STR_LEN("\033[?2027$p"));
+            write(stdin_fd, STR_LEN(SET_2027));
+            write(stdin_fd, STR_LEN(REQUEST_2027));
             response = readDECResponse(stdin_fd, STR_LEN("2027"));
             if(response == DEC_SET || response == DEC_PERMSET){
                 clust = true;
@@ -213,19 +238,21 @@ int main(const int argc, const char * const argv[]){
                 WARNF("tried to set mode 2027 for clustering but it failed (got '%c' response)\n", response);
             }
         }
-        ret = tcsetattr(stdin_fd, TCSANOW, &cur_tios);
         // TODO check that things set properly
 
 skip_checkterm:
         if(memcmp(&cur_tios, &raw_tios, sizeof cur_tios) != 0){
+            // reset terminal props
             ret = tcsetattr(stdin_fd, TCSANOW, &cur_tios);
             if(ret != 0){
                 // TODO do something
+                ERRORF("error setting terminal properties back: %s\n", strerror(errno));
             }
         }
-        if(stdin_fd != STDIN_FILENO){
-            close(stdin_fd);
-        }
+        //if(stdin_fd != STDIN_FILENO){
+        //    close(stdin_fd);
+        //}
+        close(stdin_fd);
     }
 #endif // NO_LIBGRAPHEME
 
@@ -249,7 +276,9 @@ skip_checkterm:
     mbstate_t state = {0};
     int i = 1;
     for(int lineno = 0; lineno < height && ((nread = getline(&line, &len, file)) != -1); ++lineno){
-        //DEBUGF("line: %d (read %zd)\n", i, nread);
+        DEBUGF("line: %d (read %zd)\n", i, nread);
+        debug_v(line);
+        DEBUGF("\n");
         size_t cInc = 1;
         bool usedColor = false;
         increment = true;
@@ -260,10 +289,13 @@ skip_checkterm:
                 // if c == \033 then starting color info, doesnt add to width
                 increment = false;
                 usedColor = true;
-                cInc = 2;
+                cInc = 1;
+                DEBUGF("got color at char %zu\n", c-line);
                 // save the place of the last unresolved color change to not add it to the output
                 //  (we clear this if we get something to print or a full color reset so we dont actually have to set it here)
-                //prevColStart = c;
+                prevColStart = c;
+                // increment c because we know 2 chars here but cInc is only 1 (to check every 1 chars of the color code)
+                ++c;
             }else if(increment){
                 if(*c == '\t'){
                     // if the char is a tab then add spaces manually
@@ -308,7 +340,7 @@ skip_checkterm:
                         if((jInc == (size_t)-1) || (jInc == (size_t)-2)){
                             // TODO figure out error
                             ERRORF("error: mbrlen = %zd\n", jInc);
-                            ERRORF("c: '%s', nread: %zd, line-c: %zd\n", c+j, nread, line-c-j);
+                            ERRORF("c: '%.*s', nread: %zd, line-c: %zd, j: %zu\n", (int) (nread + line - c - j), c+j, nread, line-c-j, j);
                             break;
                         }
                         // get the current multi-byte char as a wchar
@@ -317,9 +349,10 @@ skip_checkterm:
                         // get the width of the wide char to increment the visstrlen
                         //int cWidth = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
                         int cWidth = wcwidth(wcs[0]);
-                        DEBUGF("char '%.*s' width: %d (%zu bytes)\n", (int) jInc, c+j, cWidth, jInc);
+                        DEBUGF("char '%.*s' width: %d (%zu bytes), visstrlen: %d, incWidth: %d\n", (int) jInc, c+j, cWidth, jInc, visstrlen, incWidth);
                         if(cWidth >= 0){
                             if(clust){
+                                // TODO what is the size of a cluster? right now assuming its the max width of the individual chars which isnt always correct
                                 if(cWidth > incWidth){
                                     incWidth = cWidth;
                                 }
@@ -355,13 +388,16 @@ skip_checkterm:
             }else if(*c == 'm'){
                 // if c == m then ending color block, will start incrementing by width again
                 increment = true;
+                DEBUGF("finished color at char %zu\n", c-line);
                 if(!strncmp(c - (END_COL_LEN-1), END_COL_STR, END_COL_LEN)){
                     // if this is just ending a color reset str then mark as no color used
                     usedColor = false;
                 }
             }
         }
+        // TODO instead of resetting color at end look for color
         if(usedColor){
+            DEBUGF("resetting color at char %zu (ended at %zu)\n", prevColStart - line, c - line);
             // add color reset at end
             c = prevColStart;
             if((size_t)(c - line + END_COL_SIZE) > len){  // END_COL_SIZE is the length of the color reset str
@@ -403,21 +439,110 @@ skip_checkterm:
     return 0;
 }
 
+//static int repr_o(char c, char * outStr, size_t outStrSize){
+//    int len;
+//    if(isprint(c)){
+//        len = 1;
+//        if(outStrSize > 1){
+//            outStr[0] = c;
+//            outStr[1] = '\000';
+//        }else if(outStrSize > 0){
+//            outStr[0] = '\000';
+//        }
+//    }else{
+//        len = snprintf(outStr, outStrSize, "\\%03o", c);
+//    }
+//    return len;
+//}
+//static int repr_x(char c, char * outStr, size_t outStrSize){
+//    int len;
+//    if(isprint(c)){
+//        len = 1;
+//        if(outStrSize > 1){
+//            outStr[0] = c;
+//            outStr[1] = '\000';
+//        }else if(outStrSize > 0){
+//            outStr[0] = '\000';
+//        }
+//    }else{
+//        //len = snprintf(outStr, outStrSize, "0x%02x", c);
+//        len = snprintf(outStr, outStrSize, "\\x%02x", c);
+//    }
+//    return len;
+//}
+enum BASES {
+    BIN = 2,
+    OCT = 8,
+    DEC = 10,
+    HEX = 16,
+};
+static int reprChar(const unsigned char c, char * outStr, const size_t outStrSize, const enum BASES base){
+    int len;
+    if(isprint(c)){
+        len = 1;
+        // TODO at this rate just call snprintf
+        //  - or just assert that we have enough chars at the top and then we can assume we do
+        if(outStrSize > 1){
+            outStr[0] = c;
+            outStr[1] = '\000';
+        }else if(outStrSize > 0){
+            outStr[0] = '\000';
+        }
+    }else{
+        switch(base){
+            case BIN:
+                {
+                    // \b + digit per bit
+                    len = ARRAY_LENGTH("\b")-1 + 8 * sizeof c;
+                    size_t i = 0;
+                    outStr[i] = '\\';
+                    if(i >= outStrSize) goto finish_bin; else ++i;
+                    outStr[i] = 'b';
+                    if(i >= outStrSize) goto finish_bin; else ++i;
+                    for(size_t j = 1; j <= 8 * sizeof c; ++j){
+                        //outStr[i] = () ? '1' : '0';
+                        outStr[i] = ((c >> (8 * sizeof c - j)) & 0x01) + '0';
+                        if(i >= outStrSize) goto finish_bin; else ++i;
+                    }
+finish_bin:
+                    outStr[i] = '\000';
+                    break;
+                }
+            case OCT:
+                len = snprintf(outStr, outStrSize, "\\%03o", (int)c);
+                break;
+            case DEC:
+                // NOTE dont use this
+                len = snprintf(outStr, outStrSize, "\\%d", (int)c);
+                break;
+            case HEX:
+                //len = snprintf(outStr, outStrSize, "0x%02o", (int)c);
+                len = snprintf(outStr, outStrSize, "\\x%02x", (int)c);
+                break;
+            default:
+                ERRORF("base %d unknown\n", base);
+                assert(false);
+        }
+
+    }
+    return len;
+}
+static void debug_v(char str[]){
+    //char tmp[6] = {0};
+    char tmp[11] = {0};
+    for(char * c = str; *c != '\000'; ++c){
+        reprChar(*c, STR_LEN(tmp), HEX);
+        //reprChar(*c, STR_LEN(tmp), BIN);
+        DEBUGF("%s", tmp);
+    }
+}
 #ifndef NO_LIBGRAPHEME
-inline void chrError(char expected, char got){
-    WARNF("error, expected '");
-    if(isprint(expected)){
-        WARNF("%c", expected);
-    }else{
-        WARNF("\\%03o", expected);
-    }
-    WARNF("' but got '");
-    if(isprint(got)){
-        WARNF("%c", got);
-    }else{
-        WARNF("\\%03o", got);
-    }
-    WARNF("'\n");
+static inline void chrError(char expected, char got){
+    char expected_str[6] = {0};
+    char got_str[6] = {0};
+    reprChar(expected, STR_LEN(expected_str), OCT);
+    reprChar(got, STR_LEN(got_str), OCT);
+    WARNF("error, ANSI DEC response expected '%s' but got '%s'\n", expected_str, got_str);
 }
 
 DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen){
@@ -451,13 +576,9 @@ DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen){
     }
     char response = buf[i++];
     if(response < DEC_UNKNOWN || response > DEC_PERMRESET) {
-        WARNF("error, invalid response '");
-        if(isprint(response)){
-            WARNF("%c", response);
-        }else{
-            WARNF("\\%03o", response);
-        }
-        WARNF("' (expected something between %c and %c)\n", DEC_UNKNOWN, DEC_PERMRESET);
+        char resp_str[6] = {0};
+        reprChar(response, STR_LEN(resp_str), OCT);
+        WARNF("error, invalid response '%s' (expected something between %c and %c)\n", resp_str, DEC_UNKNOWN, DEC_PERMRESET);
         return DEC_UNKNOWN;
     }
     if(buf[i++] != '$')    {
