@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
+#include <poll.h>
 #endif  // NO_LIBGRAPHEME
 #include <sys/types.h>
 #include <wchar.h>
@@ -61,6 +62,9 @@ typedef enum {
 
 static void chrError(char expected, char got);
 DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen);
+
+//#define MAX_CC  ((1 << (8*sizeof (cc_t))) - 1)
+#define MAX_CC  ((cc_t) -1)
 #endif  // NO_LIBGRAPHEME
 
 static void debug_v(char str[]);
@@ -81,6 +85,7 @@ int main(const int argc, const char * const argv[]){
     const char * delim = "│";
     bool clust = false;
     bool no_2027 = false;
+    int wait_tenths = 1;
     map_t params;
     map_t flags;
     initMap(&params);
@@ -90,10 +95,13 @@ int main(const int argc, const char * const argv[]){
     MapData * heightNode = addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("height"), "h", 1, STRVIEW("columns"));
     addMapMembers(&params, &tabsize,INT,  true,  "Ssd",  STRVIEW("tabs"  ), "t", 1);
     addMapMembers(&params, delim,   STR,  true,  "Ssd",  STRVIEW("delim" ), "d", 1);
+    // TODO add color stripping options
 #ifndef NO_LIBGRAPHEME
     // TODO add option to tell it not to try mode 2027
     addMapMembers(&flags , NULL,    BOOL, false, "SS",   STRVIEW("force-cluster" ), STRVIEW("f"));
     addMapMembers(&flags , NULL,    BOOL, false, "SS",   STRVIEW("no-mode-2027"  ), STRVIEW("N"));
+    // TODO consider making this ms instead of tenths
+    addMapMembers(&params, &wait_tenths, INT, true, "SS", STRVIEW("wait-tenths"  ), STRVIEW("W"));
 #endif // NO_LIBGRAPHEME
     MapData * fileNode = addMapMembers(&params, "-",     STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
     MapData * positionalNodes[] = {
@@ -135,6 +143,7 @@ int main(const int argc, const char * const argv[]){
 #ifndef NO_LIBGRAPHEME
                 "\t[ --force-cluster|-f ]                           force length to clustered grapheme\n"
                 "\t[ --no-mode-2027|-N ]                            don't check if terminal can use clustering\n"
+                "\t[ --wait-tenths|-W ]                             time to wait for mode 2027 result from terminal (in tenths of seconds)\n"
 #endif // NO_LIBGRAPHEME
                 , tabsize, delim);
         return 1;
@@ -154,6 +163,11 @@ int main(const int argc, const char * const argv[]){
 #ifndef NO_LIBGRAPHEME
     clust   = getMapMember_bool(&flags, STR_LEN("force-cluster"));
     no_2027 = getMapMember_bool(&flags, STR_LEN("no-mode-2027"));
+    wait_tenths = getMapMember_int(&params, STR_LEN("wait-tenths"));
+    if(wait_tenths > MAX_CC){
+        WARNF("Warning: gave wait time of %gs, limiting to max of %hhu tenths\n", wait_tenths/10.0f, MAX_CC);
+        wait_tenths = MAX_CC;
+    }
 #else
     no_2027 = true;
     (void) no_2027;
@@ -212,7 +226,13 @@ int main(const int argc, const char * const argv[]){
             goto skip_checkterm;
         }
         raw_tios = cur_tios;
+        // TODO make fd non-blocking so terminal doesnt hang on lack of response
+        //  - can be done with tcsetattr with MIN and TIME of c_cc
+        //  - can be done normal way with epoll/select or whatever (optionally making it nonblocking)
         cfmakeraw(&raw_tios);
+        //DEBUGF("setting wait time for 1 byte to %gs\n", wait_tenths/10.0f);
+        //raw_tios.c_cc[VTIME] = wait_tenths;
+        //raw_tios.c_cc[VMIN] = 1;
         ret = tcsetattr(stdin_fd, TCSANOW, &raw_tios);
         // TODO check that things set properly
         if(ret != 0){
@@ -222,7 +242,24 @@ int main(const int argc, const char * const argv[]){
 #define REQUEST_2027    "\033[?2027$p"
 #define SET_2027        "\033[?2027h"
         // request if mode 2027 is set
+        //DEBUGF("sending request\n");
         write(stdin_fd, STR_LEN(REQUEST_2027));
+        //DEBUGF("reading response\n");
+        struct pollfd pollfds[1] = {0};
+        pollfds[0].fd = stdin_fd;
+        pollfds[0].events = POLLIN;
+        // TODO should i be using something other than poll?
+        //  select seems more portable but more painful to use
+        //  epoll is linux specific and faster in theory but seems like it wouldnt actually be faster for this use case of 1 fd checked once
+        ret = poll(pollfds, 1, wait_tenths*100);
+        if(ret == -1){
+            DEBUGF("poll returned %d: (%d) %s\n", ret, errno, strerror(errno));
+            goto skip_checkterm;
+        }
+        if(ret == 0 || !(pollfds[0].revents & POLLIN)){
+            DEBUGF("read not ready, skipping (assuming no clustering)\n");
+            goto skip_checkterm;
+        }
         char response = readDECResponse(stdin_fd, STR_LEN("2027"));
         //printf("got response: '%c'\n", response);
         if(response == DEC_SET || response == DEC_PERMSET){
@@ -231,6 +268,17 @@ int main(const int argc, const char * const argv[]){
             // try to set clustering
             write(stdin_fd, STR_LEN(SET_2027));
             write(stdin_fd, STR_LEN(REQUEST_2027));
+            pollfds[0].revents = 0;
+            ret = poll(pollfds, 1, wait_tenths*100);
+            if(ret == -1){
+                // TODO maybe handle different things in this case
+                DEBUGF("poll returned %d: (%d) %s\n", ret, errno, strerror(errno));
+                goto skip_checkterm;
+            }
+            if(ret == 0 || !(pollfds[0].revents & POLLIN)){
+                DEBUGF("read not ready, skipping (assuming no clustering).  weird since got return from first request..\n");
+                goto skip_checkterm;
+            }
             response = readDECResponse(stdin_fd, STR_LEN("2027"));
             if(response == DEC_SET || response == DEC_PERMSET){
                 clust = true;
@@ -241,6 +289,9 @@ int main(const int argc, const char * const argv[]){
         // TODO check that things set properly
 
 skip_checkterm:
+        // TODO maybe dont cleanup and close this if timed out reading response so it can be read later?
+        //  - right now if skipped reading then the response will be printed out to user which sucks
+        //  - but do need to set terminal back to original mode to do everything else
         if(memcmp(&cur_tios, &raw_tios, sizeof cur_tios) != 0){
             // reset terminal props
             ret = tcsetattr(stdin_fd, TCSANOW, &cur_tios);
@@ -286,7 +337,8 @@ skip_checkterm:
         for(c = prevColStart = line; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
             if(*c == '\033' && c[1] == '['){
                 // TODO check that this is actually a color and not some other type of thing
-                // if c == \033 then starting color info, doesnt add to width
+                // if c == \033[, then starting color info, doesnt add to width
+                //  - technically just starting ansi control sequence, which I'm hoping will only be color
                 increment = false;
                 usedColor = true;
                 cInc = 1;
@@ -550,7 +602,10 @@ DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen){
     // "\033[?" *mode* ";" *response* "$y"
 #   define RESPONSE_BASE_LEN  (3 + 1 + 2)
     char buf[10+10];
-    read(fd, buf, RESPONSE_BASE_LEN + 1 + modelen);
+    ssize_t len = read(fd, buf, RESPONSE_BASE_LEN + 1 + modelen);
+    if(len < 1){
+        WARNF("read timed out getting response for mode %.*s from terminal: %s\n", (int) modelen, mode, strerror(errno));
+    }
     size_t i = 0;
     if(buf[i++] != '\033') {
         chrError('\033', buf[i-1]);
