@@ -20,6 +20,12 @@
 #include "clparser/parseargs.h"
 #include "libgrapheme/grapheme.h"
 
+// maybe test on this stuff:
+// 12345678901234567890123456789123456789
+// 🧑‍🌾
+// Tëst 👨‍👩‍👦 🇺🇸 नी நி!
+// u̲n̲d̲e̲r̲l̲i̲n̲e̲d̲
+
 #define END_COL_STR  ("\033[0m")
 #define END_COL_SIZE (sizeof END_COL_STR)
 #define END_COL_LEN  (END_COL_SIZE - 1)

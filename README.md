@@ -41,7 +41,10 @@ file taken as positional argument
     - I use this script for previewing text files in `lf`
 
 ![demo](screenshot.png)
-- TODO update screenshot, this is super old
+- NOTE how it will look will depend on the terminal and how it renders unicode characters
+    - for terminals that dont cluster unicode characters, the width will  be calculated correctly, but things will look weird
+    - for terminals that do   cluster unicode characters, the width might be calculated correctly, but often won't be
+        - in this example, the U and S emojis making up the flag are reported as having a width of 1 from `wcwidth`, so the flag is assumed to have 1 width when clustered, even though all of those emojis should have width 2
 
 ## Building
 - relies on clparser submodule
