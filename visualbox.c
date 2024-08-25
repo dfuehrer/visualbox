@@ -30,7 +30,7 @@
 #define END_COL_SIZE (sizeof END_COL_STR)
 #define END_COL_LEN  (END_COL_SIZE - 1)
 
-//#define DEBUG_MESSAGES
+#define DEBUG_MESSAGES
 #ifdef DEBUG_MESSAGES
 #   define DEBUGF(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -66,12 +66,63 @@ typedef enum {
     DEC_PERMRESET = '4',
 } DEC_RESPONSE;
 
+enum BASES {
+    BIN = 2,
+    OCT = 8,
+    DEC = 10,
+    HEX = 16,
+};
+
+static int reprChar(const unsigned char c, char * outStr, const size_t outStrSize, const enum BASES base);
 static void chrError(char expected, char got);
 DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen);
 
 //#define MAX_CC  ((1 << (8*sizeof (cc_t))) - 1)
 #define MAX_CC  ((cc_t) -1)
 #endif  // NO_LIBGRAPHEME
+
+typedef unsigned char SGRCode;
+//typedef StringView SGRCode;
+typedef struct SGRColor {
+    SGRCode code;
+    SGRCode depth;
+    union {
+        SGRCode ind;
+        struct {
+            SGRCode r;
+            SGRCode g;
+            SGRCode b;
+        };
+    };
+} SGRColor;
+union SGR {
+    struct SGRSet {
+        SGRCode bold;        // 1
+        SGRCode faint;       // 2, 22    // 22 reset bold and faint
+        SGRCode italic;      // 3, 23    // 23 reset italic
+        SGRCode underline;   // 4, 24    // 24 reset underline
+        SGRCode blink;       // 5, 6, 25 // 25 reset blink
+        SGRCode invert;      // 7, 27    // 27 reset inverse
+        SGRCode hide;        // 8, 28    // 28 reset hide
+        SGRCode strikeout;   // 9, 29    // 29 reset stikeout
+        SGRCode font;        // 10, 11-19
+        SGRCode fraktur;     // 20   // i dont know this word but i guess its a font thing
+        SGRCode dunderline;  // 21   // either double underline or disable bold... so it kinda double dips
+        SGRCode space;       // 26, 50   // 50 reset proportional spacing
+        SGRColor fg_color;    // 30-37, 38, 39, 90-97    // 39 reset fg color
+        SGRColor bg_color;    // 40-47, 48, 49, 100-107  // 49 reset fg color
+        SGRCode frame;       // 51
+        SGRCode circle;      // 52, 54  // 54 reset framed and circled
+        SGRCode overline;    // 53, 55  // 55 reset overlined
+        SGRColor ul_color;    // 58, 59  // 59 reset underline color
+        SGRCode ideogram;    // 60-64, 65   // 65 reset ideogram
+        SGRCode superscript; // 73, 74, 75  // 75 reset superscript and subscript
+    } codeStruct;
+    SGRCode codeArr[sizeof (struct SGRSet) / sizeof (SGRCode)];
+};
+
+bool setSGRCode(struct SGRSet * codes, const char * str, char ** endptr);
+static bool setSGRColor(struct SGRColor * color, char ** endptr);
 
 static void debug_v(char str[]);
 
@@ -332,6 +383,7 @@ skip_checkterm:
     ssize_t nread = 0;
     mbstate_t state = {0};
     int i = 1;
+    union SGR codes = {0};
     for(int lineno = 0; lineno < height && ((nread = getline(&line, &len, file)) != -1); ++lineno){
         DEBUGF("line: %d (read %zd)\n", i, nread);
         debug_v(line);
@@ -342,18 +394,31 @@ skip_checkterm:
         visstrlen = 0;
         for(c = prevColStart = line; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
             if(*c == '\033' && c[1] == '['){
-                // TODO check that this is actually a color and not some other type of thing
-                // if c == \033[, then starting color info, doesnt add to width
-                //  - technically just starting ansi control sequence, which I'm hoping will only be color
-                increment = false;
-                usedColor = true;
-                cInc = 1;
                 DEBUGF("got color at char %zu\n", c-line);
-                // save the place of the last unresolved color change to not add it to the output
-                //  (we clear this if we get something to print or a full color reset so we dont actually have to set it here)
-                prevColStart = c;
-                // increment c because we know 2 chars here but cInc is only 1 (to check every 1 chars of the color code)
-                ++c;
+                char * tmp = c + 2;
+                while(tmp[-1] != 'm'){
+                    bool goodCodes = setSGRCode(&codes.codeStruct, tmp, &tmp);
+                    if(!goodCodes){
+                        DEBUGF("error, bad SGR code, moving on like it was fine\n");
+                        // TODO do something maybe depending on args
+                        // - maybe clear codes
+                        break;
+                    }
+                }
+                cInc = 1;
+                c = tmp - cInc;
+                //// TODO check that this is actually a color and not some other type of thing
+                //// if c == \033[, then starting color info, doesnt add to width
+                ////  - technically just starting ansi control sequence, which I'm hoping will only be color
+                //increment = false;
+                //usedColor = true;
+                //cInc = 1;
+                //DEBUGF("got color at char %zu\n", c-line);
+                //// save the place of the last unresolved color change to not add it to the output
+                ////  (we clear this if we get something to print or a full color reset so we dont actually have to set it here)
+                //prevColStart = c;
+                //// increment c because we know 2 chars here but cInc is only 1 (to check every 1 chars of the color code)
+                //++c;
             }else if(increment){
                 if(*c == '\t'){
                     // if the char is a tab then add spaces manually
@@ -497,6 +562,167 @@ skip_checkterm:
     return 0;
 }
 
+
+static bool readSGRCode(SGRCode * code, const char * str, char ** endptr){
+    long num = strtol(str, endptr, 10);
+    // TODO prolly check errno
+    // if str at ; or m then input skipped because it was 0
+    if((*endptr)[0] != ';' && (*endptr)[0] != 'm'){
+        // error because found something that wasnt ;, m, or int
+        //DEBUGF("could not interpret ANSI SGR code '%.*s', does not end with ';' or 'm'\n", (int)(*endptr - str), str);
+        DEBUGF("could not interpret ANSI SGR code '");
+        for(const char * c = str; c < *endptr && *c != '\000'; ++c){
+            char tmp[11] = {0};
+            reprChar(*c, STR_LEN(tmp), HEX);
+            //reprChar(*c, STR_LEN(tmp), OCT);
+            DEBUGF("%s", tmp);
+        }
+        DEBUGF("' (len %zu), does not end with ';' or 'm'\n", (size_t)(*endptr - str));
+        return false;
+    }
+    // increment endptr to get past ; or m
+    ++(*endptr);
+    if(num > (unsigned char) -1){
+        DEBUGF("could not interpret ANSI SGR code '%ld'\n", num);
+        return false;
+    }
+    *code = num;
+
+    return true;
+}
+static bool setSGRColor(struct SGRColor * color, char ** endptr){
+    bool success = false;
+    success = readSGRCode(&color->depth, *endptr, endptr);
+    if(!success){
+        return success;
+    }
+    if(color->depth == 2){
+        // 256 color pallette
+        success = readSGRCode(&color->ind, *endptr, endptr);
+    }else if(color->depth == 5){
+        // full color (rgb)
+        success = readSGRCode(&color->r, *endptr, endptr);
+        if(!success){
+            goto ret;
+        }
+        success = readSGRCode(&color->g, *endptr, endptr);
+        if(!success){
+            goto ret;
+        }
+        success = readSGRCode(&color->b, *endptr, endptr);
+    }else{
+        DEBUGF("could not interpret ANSI SGR code %d, expected 2 or 5\n", color->depth);
+        return false;
+    }
+ret:
+    return success;
+}
+bool setSGRCode(struct SGRSet * codes, const char * str, char ** endptr){
+
+    SGRCode code = 0;
+    bool ret = readSGRCode(&code, str, endptr);
+    DEBUGF("got code %hhd, good: %d\n", code, ret);
+
+    switch(code){
+        case  0:
+            memset(codes, 0, sizeof *codes);
+            break;
+        // TODO make enum vals for these so this is readable
+        case  1: codes->bold          = code;   break;
+        case  2:
+        case 22: codes->faint         = code;   break;
+        case  3:
+        case 23: codes->italic        = code;   break;
+        case  4:
+        case 24: codes->underline     = code;   break;
+        case  5:
+        case  6:
+        case 25: codes->blink         = code;   break;
+        case  7:
+        case 27: codes->invert        = code;   break;
+        case  8:
+        case 28: codes->hide          = code;   break;
+        case  9:
+        case 29: codes->strikeout     = code;   break;
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+        case 15:
+        case 16:
+        case 17:
+        case 18:
+        case 19: codes->font          = code;   break;
+        case 20: codes->fraktur       = code;   break;      // i dont know this word but i guess its a font thing
+        case 21: codes->dunderline    = code;   break;      // either double underline or disable bold... so it kinda double dips
+        case 26:
+        case 50: codes->space         = code;   break;
+        case 30:
+        case 31:
+        case 32:
+        case 33:
+        case 34:
+        case 35:
+        case 36:
+        case 37:
+        case 39:
+        case 90:
+        case 91:
+        case 92:
+        case 93:
+        case 94:
+        case 95:
+        case 96:
+        case 97: codes->fg_color.code = code;   break;
+        case 38: codes->fg_color.code = code;
+                 ret = setSGRColor(&codes->fg_color, endptr);
+                 break;
+        case 40:
+        case 41:
+        case 42:
+        case 43:
+        case 44:
+        case 45:
+        case 46:
+        case 47:
+        case 49:
+        case 100:
+        case 101:
+        case 102:
+        case 103:
+        case 104:
+        case 105:
+        case 106:
+        case 107:codes->bg_color.code = code;   break;
+        case 48: codes->bg_color.code = code;
+                 ret = setSGRColor(&codes->bg_color, endptr);
+                 break;
+        case 51: codes->frame         = code;   break;
+        case 52:
+        case 54: codes->circle        = code;   break;
+        case 53:
+        case 55: codes->overline      = code;   break;
+        case 59: codes->ul_color.code = code;   break;
+        case 58: codes->ul_color.code = code;
+                 ret = setSGRColor(&codes->ul_color, endptr);
+                 break;
+        case 60:
+        case 61:
+        case 62:
+        case 63:
+        case 64:
+        case 65: codes->ideogram      = code;   break;
+        case 73:
+        case 74:
+        case 75: codes->superscript   = code;   break;
+        default:
+                 ret = false;
+    }
+
+    return ret;
+}
+
 //static int repr_o(char c, char * outStr, size_t outStrSize){
 //    int len;
 //    if(isprint(c)){
@@ -528,12 +754,6 @@ skip_checkterm:
 //    }
 //    return len;
 //}
-enum BASES {
-    BIN = 2,
-    OCT = 8,
-    DEC = 10,
-    HEX = 16,
-};
 static int reprChar(const unsigned char c, char * outStr, const size_t outStrSize, const enum BASES base){
     int len;
     if(isprint(c)){
