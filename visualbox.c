@@ -30,7 +30,7 @@
 #define END_COL_SIZE (sizeof END_COL_STR)
 #define END_COL_LEN  (END_COL_SIZE - 1)
 
-#define DEBUG_MESSAGES
+//#define DEBUG_MESSAGES
 #ifdef DEBUG_MESSAGES
 #   define DEBUGF(...) fprintf(stderr, __VA_ARGS__)
 #else
@@ -109,6 +109,7 @@ union SGR {
         SGRCode fraktur;     // 20   // i dont know this word but i guess its a font thing
         SGRCode dunderline;  // 21   // either double underline or disable bold... so it kinda double dips
         SGRCode space;       // 26, 50   // 50 reset proportional spacing
+        // TODO move these colors out so the other codes are easy to array and the colors can be handled separately
         SGRColor fg_color;    // 30-37, 38, 39, 90-97    // 39 reset fg color
         SGRColor bg_color;    // 40-47, 48, 49, 100-107  // 49 reset fg color
         SGRCode frame;       // 51
@@ -121,8 +122,14 @@ union SGR {
     SGRCode codeArr[sizeof (struct SGRSet) / sizeof (SGRCode)];
 };
 
-bool setSGRCode(struct SGRSet * codes, const char * str, char ** endptr);
-static bool setSGRColor(struct SGRColor * color, char ** endptr);
+enum ParseSGRState {
+    PARSE_ERROR,    // found invalid format
+    PARSE_CONT,     // ;
+    PARSE_FINISH,   // m
+    PARSE_CLEAR,    // clear out (0), implies m (if it just ended in ; then its continuing and isnt really a clear)
+};
+enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** endptr);
+static enum ParseSGRState setSGRColor(struct SGRColor * color, char ** endptr);
 
 static void debug_v(char str[]);
 
@@ -233,21 +240,7 @@ int main(const int argc, const char * const argv[]){
     freeMap(&params);
     // 2: out of width bounds error
     if((width < 1) || (height < 1)){
-        fputs("Seriously, if you want to output nothing there are easier ways\n", stderr);
-        // TODO this is dumb because it doesnt check how long the output is and doesnt output the delimeter
-        if(height > 0){
-            // if asked for no width then print out the number of empty lines asked for
-            // TODO should also read through the buffer if piped in
-            char * line = calloc(height, sizeof (char));
-            if(line == NULL){
-                perror("allocate line");
-                exit(EXIT_FAILURE);
-            }
-            memset(line, '\n', height-1);
-            line[height-1] = '\0';
-            puts(line);
-            free(line);
-        }
+        WARNF("Seriously, if you want to output nothing there are easier ways\n");
         return 2;
     }
 
@@ -372,7 +365,6 @@ skip_checkterm:
     // TODO use wcswidth to find the width at the end
     //  this will require having a separate array so i can remove all control chars / non-printing chars, may be a pain
     int visstrlen = 0;
-    bool increment = true;
 
     // start by allocating the bare minimum size
     char * c = NULL;
@@ -384,142 +376,122 @@ skip_checkterm:
     mbstate_t state = {0};
     int i = 1;
     union SGR codes = {0};
+    enum ParseSGRState SGRstate = PARSE_CONT;
     for(int lineno = 0; lineno < height && ((nread = getline(&line, &len, file)) != -1); ++lineno){
         DEBUGF("line: %d (read %zd)\n", i, nread);
         debug_v(line);
         DEBUGF("\n");
         size_t cInc = 1;
-        bool usedColor = false;
-        increment = true;
         visstrlen = 0;
         for(c = prevColStart = line; (visstrlen < width) && (*c != '\n') && (*c != '\0') && (*c != '\r'); c += cInc){
             if(*c == '\033' && c[1] == '['){
                 DEBUGF("got color at char %zu\n", c-line);
                 char * tmp = c + 2;
-                while(tmp[-1] != 'm'){
-                    bool goodCodes = setSGRCode(&codes.codeStruct, tmp, &tmp);
-                    if(!goodCodes){
+                SGRstate = PARSE_CONT;
+                while(SGRstate == PARSE_CONT){
+                    SGRstate = setSGRCode(&codes.codeStruct, tmp, &tmp);
+                    if(SGRstate == PARSE_ERROR){
                         DEBUGF("error, bad SGR code, moving on like it was fine\n");
                         // TODO do something maybe depending on args
                         // - maybe clear codes
-                        break;
                     }
                 }
                 cInc = 1;
                 c = tmp - cInc;
-                //// TODO check that this is actually a color and not some other type of thing
-                //// if c == \033[, then starting color info, doesnt add to width
-                ////  - technically just starting ansi control sequence, which I'm hoping will only be color
-                //increment = false;
-                //usedColor = true;
-                //cInc = 1;
-                //DEBUGF("got color at char %zu\n", c-line);
-                //// save the place of the last unresolved color change to not add it to the output
-                ////  (we clear this if we get something to print or a full color reset so we dont actually have to set it here)
-                //prevColStart = c;
-                //// increment c because we know 2 chars here but cInc is only 1 (to check every 1 chars of the color code)
-                //++c;
-            }else if(increment){
-                if(*c == '\t'){
-                    // if the char is a tab then add spaces manually
-                    // if not enough room to just move the string then allocate more room
-                    int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize - (visstrlen % tabsize);
-                    if((size_t)(nread + tabsize) > len){
-                        // not doing a realloc because i dont want to move the whole string and then have to move the end of the string again
-                        // TODO try to check if we can actaully just make the buffer bigger and use the efficient form of realloc
-                        // TODO maybe check how many tabs are left in the line so we can just allocate once for this line
-                        len += tabAmount;
-                        char * tmpLine = malloc(len);
-                        memcpy(tmpLine, line, c - line);
-                        char * tmpc = tmpLine + (c - line);
-                        memset(tmpc, ' ', tabAmount);
-                        strcpy(tmpc + tabAmount, c + 1);
-                        free(line);
-                        line = tmpLine;
-                        c = tmpc;
-                    }else{
-                        // move the string forward and add in the spaces where the tab was
-                        memmove(c + tabAmount, c + 1, nread + line - c);
-                        memset(c, ' ', tabAmount);
-                    }
-                    // count all tabAmount spaces now
-                    nread += tabAmount-1;
-                    visstrlen += tabAmount;
-                    cInc = tabAmount;
+                DEBUGF("end color at char %zu\n", c-line);
+                continue;
+            }
+            if(*c == '\t'){
+                // if the char is a tab then add spaces manually
+                // if not enough room to just move the string then allocate more room
+                int tabAmount = (visstrlen + tabsize > width) ? width - visstrlen : tabsize - (visstrlen % tabsize);
+                if((size_t)(nread + tabsize) > len){
+                    // not doing a realloc because i dont want to move the whole string and then have to move the end of the string again
+                    // TODO try to check if we can actaully just make the buffer bigger and use the efficient form of realloc
+                    // TODO maybe check how many tabs are left in the line so we can just allocate once for this line
+                    len += tabAmount;
+                    char * tmpLine = malloc(len);
+                    memcpy(tmpLine, line, c - line);
+                    char * tmpc = tmpLine + (c - line);
+                    memset(tmpc, ' ', tabAmount);
+                    strcpy(tmpc + tabAmount, c + 1);
+                    free(line);
+                    line = tmpLine;
+                    c = tmpc;
                 }else{
-#                   ifndef NO_LIBGRAPHEME
-                        cInc = grapheme_next_character_break_utf8(c, nread + line - c);
-                        DEBUGF("1 char: '%.*s' (%zu bytes)\n", (int) cInc, c, cInc);
-#                   else
-                        cInc = 1;
-#                   endif   // NO_LIBGRAPHEME
-                    size_t j;
-                    size_t jInc = 0;
-                    int incWidth = 0;
-                    for(j = 0; j < cInc; j += jInc){
-                        // get the number of chars in the current multi-byte char (code point)
-                        jInc = mbrlen(c + j, nread + line - c - j, &state);
-                        // if it was an error then break
-                        if((jInc == (size_t)-1) || (jInc == (size_t)-2)){
-                            // TODO figure out error
-                            ERRORF("error: mbrlen = %zd\n", jInc);
-                            ERRORF("c: '%.*s', nread: %zd, line-c: %zd, j: %zu\n", (int) (nread + line - c - j), c+j, nread, line-c-j, j);
-                            break;
-                        }
-                        // get the current multi-byte char as a wchar
-                        wchar_t wcs[2] = L"";
-                        mbrtowc(wcs, c+j, jInc, &state);
-                        // get the width of the wide char to increment the visstrlen
-                        //int cWidth = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
-                        int cWidth = wcwidth(wcs[0]);
-                        DEBUGF("char '%.*s' width: %d (%zu bytes), visstrlen: %d, incWidth: %d\n", (int) jInc, c+j, cWidth, jInc, visstrlen, incWidth);
-                        if(cWidth >= 0){
-                            if(clust){
-                                // TODO what is the size of a cluster? right now assuming its the max width of the individual chars which isnt always correct
-                                if(cWidth > incWidth){
-                                    incWidth = cWidth;
-                                }
-                            }else{
-                                incWidth += cWidth;
+                    // move the string forward and add in the spaces where the tab was
+                    memmove(c + tabAmount, c + 1, nread + line - c);
+                    memset(c, ' ', tabAmount);
+                }
+                // count all tabAmount spaces now
+                nread += tabAmount-1;
+                visstrlen += tabAmount;
+                cInc = tabAmount;
+            }else{
+#               ifndef NO_LIBGRAPHEME
+                    cInc = grapheme_next_character_break_utf8(c, nread + line - c);
+                DEBUGF("1 char: '%.*s' (%zu bytes)\n", (int) cInc, c, cInc);
+#               else
+                    cInc = 1;
+#               endif   // NO_LIBGRAPHEME
+                size_t j;
+                size_t jInc = 0;
+                int incWidth = 0;
+                for(j = 0; j < cInc; j += jInc){
+                    // get the number of chars in the current multi-byte char (code point)
+                    jInc = mbrlen(c + j, nread + line - c - j, &state);
+                    // if it was an error then break
+                    if((jInc == (size_t)-1) || (jInc == (size_t)-2)){
+                        // TODO figure out error
+                        ERRORF("error: mbrlen = %zd\n", jInc);
+                        ERRORF("c: '%.*s', nread: %zd, line-c: %zd, j: %zu\n", (int) (nread + line - c - j), c+j, nread, line-c-j, j);
+                        break;
+                    }
+                    // get the current multi-byte char as a wchar
+                    wchar_t wcs[2] = L"";
+                    mbrtowc(wcs, c+j, jInc, &state);
+                    // get the width of the wide char to increment the visstrlen
+                    //int cWidth = wcswidth(wcs, cInc / (sizeof wcs[0]) + 1);
+                    int cWidth = wcwidth(wcs[0]);
+                    DEBUGF("char '%.*s' width: %d (%zu bytes), visstrlen: %d, incWidth: %d\n", (int) jInc, c+j, cWidth, jInc, visstrlen, incWidth);
+                    if(cWidth >= 0){
+                        if(clust){
+                            // TODO what is the size of a cluster? right now assuming its the max width of the individual chars which isnt always correct
+                            if(cWidth > incWidth){
+                                incWidth = cWidth;
                             }
                         }else{
-                            WARNF("char '%.*s' (%zu len) unprintable\n", (int) jInc, c+j, jInc);
+                            incWidth += cWidth;
                         }
-                        //DEBUGF("chars: %zd, width: %d, str: '%*s'\n", cInc, cWidth, (int)cInc, c);
-                        // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
-                        if(visstrlen + incWidth > width){
-                            break;
-                        }
+                    }else{
+                        WARNF("char '%.*s' (%zu len) unprintable\n", (int) jInc, c+j, jInc);
                     }
-                    // if didnt finish loop above then break out of this loop too
-                    if(j < cInc){
+                    //DEBUGF("chars: %zd, width: %d, str: '%*s'\n", cInc, cWidth, (int)cInc, c);
+                    // if the visstrlen would be greater than the width then were done, dont increment the visstrlen
+                    if(visstrlen + incWidth > width){
                         break;
-                    }else if(j > cInc){
-#                       ifndef NO_LIBGRAPHEME
-                            ERRORF("error: libgrapheme grapheme cluster length and mbrlen disagree: %zu vs %zu, using mbrlen\n", cInc, j);
-#                       endif // NO_LIBGRAPHEME
-                        cInc = j;
                     }
-//#                   ifdef NO_LIBGRAPHEME
-//                        cInc = j;
-//#                   endif
-                    visstrlen += incWidth;
                 }
-                // clear the prev color start pointer since we are currently dealing with actual output
-                prevColStart = c + cInc;
-                //DEBUGF("%c: %d\n", *c, visstrlen);
-            }else if(*c == 'm'){
-                // if c == m then ending color block, will start incrementing by width again
-                increment = true;
-                DEBUGF("finished color at char %zu\n", c-line);
-                if(!strncmp(c - (END_COL_LEN-1), END_COL_STR, END_COL_LEN)){
-                    // if this is just ending a color reset str then mark as no color used
-                    usedColor = false;
+                // if didnt finish loop above then break out of this loop too
+                if(j < cInc){
+                    break;
+                }else if(j > cInc){
+#                   ifndef NO_LIBGRAPHEME
+                        ERRORF("error: libgrapheme grapheme cluster length and mbrlen disagree: %zu vs %zu, using mbrlen\n", cInc, j);
+#                   endif // NO_LIBGRAPHEME
+                    cInc = j;
                 }
+//#               ifdef NO_LIBGRAPHEME
+//                    cInc = j;
+//#               endif
+                visstrlen += incWidth;
             }
+            // clear the prev color start pointer since we are currently dealing with actual output
+            prevColStart = c + cInc;
+            //DEBUGF("%c: %d\n", *c, visstrlen);
         }
         // TODO instead of resetting color at end look for color
-        if(usedColor){
+        if(SGRstate == PARSE_FINISH){
             DEBUGF("resetting color at char %zu (ended at %zu)\n", prevColStart - line, c - line);
             // add color reset at end
             c = prevColStart;
@@ -558,12 +530,13 @@ skip_checkterm:
         //printf("%s%lc\n", line, L'│');
         ++i;
     }
+    // TODO maybe dont do final free just before quitting since it just takes time for no reason
     free(line);
     return 0;
 }
 
 
-static bool readSGRCode(SGRCode * code, const char * str, char ** endptr){
+static enum ParseSGRState readSGRCode(SGRCode * code, const char * str, char ** endptr){
     long num = strtol(str, endptr, 10);
     // TODO prolly check errno
     // if str at ; or m then input skipped because it was 0
@@ -578,55 +551,58 @@ static bool readSGRCode(SGRCode * code, const char * str, char ** endptr){
             DEBUGF("%s", tmp);
         }
         DEBUGF("' (len %zu), does not end with ';' or 'm'\n", (size_t)(*endptr - str));
-        return false;
+        return PARSE_ERROR;
     }
     // increment endptr to get past ; or m
     ++(*endptr);
     if(num > (unsigned char) -1){
         DEBUGF("could not interpret ANSI SGR code '%ld'\n", num);
-        return false;
+        return PARSE_ERROR;
     }
     *code = num;
 
-    return true;
+    DEBUGF("end with char '%c': %d\n", (*endptr)[-1], ((*endptr)[-1] == ';') ? PARSE_CONT : PARSE_FINISH);
+    return ((*endptr)[-1] == ';') ? PARSE_CONT : PARSE_FINISH;
 }
-static bool setSGRColor(struct SGRColor * color, char ** endptr){
-    bool success = false;
-    success = readSGRCode(&color->depth, *endptr, endptr);
-    if(!success){
-        return success;
+static enum ParseSGRState setSGRColor(struct SGRColor * color, char ** endptr){
+    enum ParseSGRState state;
+    state = readSGRCode(&color->depth, *endptr, endptr);
+    if(state != PARSE_CONT){
+        //return state;
+        return PARSE_ERROR;
     }
-    if(color->depth == 2){
+    if(color->depth == 5){
         // 256 color pallette
-        success = readSGRCode(&color->ind, *endptr, endptr);
-    }else if(color->depth == 5){
+        state = readSGRCode(&color->ind, *endptr, endptr);
+    }else if(color->depth == 2){
         // full color (rgb)
-        success = readSGRCode(&color->r, *endptr, endptr);
-        if(!success){
+        state = readSGRCode(&color->r, *endptr, endptr);
+        if(state != PARSE_CONT){
+            //state = PARSE_ERROR;
             goto ret;
         }
-        success = readSGRCode(&color->g, *endptr, endptr);
-        if(!success){
+        state = readSGRCode(&color->g, *endptr, endptr);
+        if(state != PARSE_CONT){
+            //state = PARSE_ERROR;
             goto ret;
         }
-        success = readSGRCode(&color->b, *endptr, endptr);
+        state = readSGRCode(&color->b, *endptr, endptr);
     }else{
         DEBUGF("could not interpret ANSI SGR code %d, expected 2 or 5\n", color->depth);
-        return false;
+        return PARSE_ERROR;
     }
 ret:
-    return success;
+    return state;
 }
-bool setSGRCode(struct SGRSet * codes, const char * str, char ** endptr){
+enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** endptr){
 
     SGRCode code = 0;
-    bool ret = readSGRCode(&code, str, endptr);
-    DEBUGF("got code %hhd, good: %d\n", code, ret);
+    enum ParseSGRState ret = readSGRCode(&code, str, endptr);
+    DEBUGF("got code %hhd, state: %d\n", code, ret);
 
     switch(code){
-        case  0:
-            memset(codes, 0, sizeof *codes);
-            break;
+        case  0: memset(codes, 0, sizeof *codes);
+                 break;
         // TODO make enum vals for these so this is readable
         case  1: codes->bold          = code;   break;
         case  2:
@@ -716,8 +692,7 @@ bool setSGRCode(struct SGRSet * codes, const char * str, char ** endptr){
         case 73:
         case 74:
         case 75: codes->superscript   = code;   break;
-        default:
-                 ret = false;
+        default: ret = PARSE_ERROR;
     }
 
     return ret;
