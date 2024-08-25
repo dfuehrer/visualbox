@@ -97,27 +97,28 @@ typedef struct SGRColor {
 } SGRColor;
 union SGR {
     struct SGRSet {
-        SGRCode bold;        // 1
-        SGRCode faint;       // 2, 22    // 22 reset bold and faint
-        SGRCode italic;      // 3, 23    // 23 reset italic
-        SGRCode underline;   // 4, 24    // 24 reset underline
-        SGRCode blink;       // 5, 6, 25 // 25 reset blink
-        SGRCode invert;      // 7, 27    // 27 reset inverse
-        SGRCode hide;        // 8, 28    // 28 reset hide
-        SGRCode strikeout;   // 9, 29    // 29 reset stikeout
-        SGRCode font;        // 10, 11-19
-        SGRCode fraktur;     // 20   // i dont know this word but i guess its a font thing
-        SGRCode dunderline;  // 21   // either double underline or disable bold... so it kinda double dips
-        SGRCode space;       // 26, 50   // 50 reset proportional spacing
-        // TODO move these colors out so the other codes are easy to array and the colors can be handled separately
-        SGRColor fg_color;    // 30-37, 38, 39, 90-97    // 39 reset fg color
-        SGRColor bg_color;    // 40-47, 48, 49, 100-107  // 49 reset fg color
-        SGRCode frame;       // 51
-        SGRCode circle;      // 52, 54  // 54 reset framed and circled
-        SGRCode overline;    // 53, 55  // 55 reset overlined
-        SGRColor ul_color;    // 58, 59  // 59 reset underline color
-        SGRCode ideogram;    // 60-64, 65   // 65 reset ideogram
-        SGRCode superscript; // 73, 74, 75  // 75 reset superscript and subscript
+        struct SimpleSGRCodes {
+            SGRCode bold;        // 1
+            SGRCode faint;       // 2, 22    // 22 reset bold and faint
+            SGRCode italic;      // 3, 23    // 23 reset italic
+            SGRCode underline;   // 4, 24    // 24 reset underline
+            SGRCode blink;       // 5, 6, 25 // 25 reset blink
+            SGRCode invert;      // 7, 27    // 27 reset inverse
+            SGRCode hide;        // 8, 28    // 28 reset hide
+            SGRCode strikeout;   // 9, 29    // 29 reset stikeout
+            SGRCode font;        // 10, 11-19
+            SGRCode fraktur;     // 20   // i dont know this word but i guess its a font thing
+            SGRCode dunderline;  // 21   // either double underline or disable bold... so it kinda double dips
+            SGRCode space;       // 26, 50   // 50 reset proportional spacing
+            SGRCode frame;       // 51
+            SGRCode circle;      // 52, 54  // 54 reset framed and circled
+            SGRCode overline;    // 53, 55  // 55 reset overlined
+            SGRCode ideogram;    // 60-64, 65   // 65 reset ideogram
+            SGRCode superscript; // 73, 74, 75  // 75 reset superscript and subscript
+        } simpleCodes;
+        SGRColor fg_color;   // 30-37, 38, 39, 90-97    // 39 reset fg color
+        SGRColor bg_color;   // 40-47, 48, 49, 100-107  // 49 reset fg color
+        SGRColor ul_color;   // 58, 59  // 59 reset underline color
     } codeStruct;
     SGRCode codeArr[sizeof (struct SGRSet) / sizeof (SGRCode)];
 };
@@ -516,6 +517,76 @@ skip_checkterm:
         //printf("%s%-*s%lc\n", line, width - visstrlen, "", L'│');
         printf("%s%-*s%s\n", line, width - visstrlen, "", delim);
 
+        // TODO add args to turn on setting codes for new lines
+        if(true && SGRstate == PARSE_FINISH){
+            bool first = true;
+            for(size_t codeNum = 0; codeNum < sizeof codes.codeStruct.simpleCodes; ++codeNum){
+                if(codes.codeArr[codeNum] != 0){
+                    if(first){
+                        first = false;
+                        printf("\033[");
+                    }else{
+                        putchar(';');
+                    }
+                    printf("%hhu", codes.codeArr[codeNum]);
+                }
+            }
+            if(codes.codeStruct.fg_color.code != 0){
+                if(first){
+                    first = false;
+                    printf("\033[");
+                }else{
+                    putchar(';');
+                }
+                printf("%hhu", codes.codeStruct.fg_color.code);
+                if(codes.codeStruct.fg_color.code == 38){
+                    putchar(';');
+                    if(codes.codeStruct.fg_color.depth == 5){
+                        printf("5;%hhu", codes.codeStruct.fg_color.ind);
+                    }else if(codes.codeStruct.fg_color.depth == 2){
+                        printf("2;%hhu;%hhu;%hhu", codes.codeStruct.fg_color.r, codes.codeStruct.fg_color.g, codes.codeStruct.fg_color.b);
+                    }
+                }
+            }
+            if(codes.codeStruct.bg_color.code != 0){
+                if(first){
+                    first = false;
+                    printf("\033[");
+                }else{
+                    putchar(';');
+                }
+                printf("%hhu", codes.codeStruct.bg_color.code);
+                if(codes.codeStruct.bg_color.code == 48){
+                    putchar(';');
+                    if(codes.codeStruct.bg_color.depth == 5){
+                        printf("5;%hhu", codes.codeStruct.bg_color.ind);
+                    }else if(codes.codeStruct.bg_color.depth == 2){
+                        printf("2;%hhu;%hhu;%hhu", codes.codeStruct.bg_color.r, codes.codeStruct.bg_color.g, codes.codeStruct.bg_color.b);
+                    }
+                }
+            }
+            if(codes.codeStruct.ul_color.code != 0){
+                if(first){
+                    first = false;
+                    printf("\033[");
+                }else{
+                    putchar(';');
+                }
+                printf("%hhu", codes.codeStruct.ul_color.code);
+                if(codes.codeStruct.ul_color.code == 98){
+                    putchar(';');
+                    if(codes.codeStruct.ul_color.depth == 5){
+                        printf("5;%hhu", codes.codeStruct.ul_color.ind);
+                    }else if(codes.codeStruct.ul_color.depth == 2){
+                        printf("2;%hhu;%hhu;%hhu", codes.codeStruct.ul_color.r, codes.codeStruct.ul_color.g, codes.codeStruct.ul_color.b);
+                    }
+                }
+            }
+            if(!first){
+                putchar('m');
+            }
+        }
+
         // add spaces at end if missing room
         // TODO need to allocate more space to be able to do this (should allocate it at the same time as the usedColor realloc
         //c += END_COL_LEN;
@@ -601,25 +672,24 @@ enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** e
     DEBUGF("got code %hhd, state: %d\n", code, ret);
 
     switch(code){
-        case  0: memset(codes, 0, sizeof *codes);
-                 break;
+        case  0: memset(codes, 0, sizeof *codes);         break;
         // TODO make enum vals for these so this is readable
-        case  1: codes->bold          = code;   break;
+        case  1: codes->simpleCodes.bold        = code;   break;
         case  2:
-        case 22: codes->faint         = code;   break;
+        case 22: codes->simpleCodes.faint       = code;   break;
         case  3:
-        case 23: codes->italic        = code;   break;
+        case 23: codes->simpleCodes.italic      = code;   break;
         case  4:
-        case 24: codes->underline     = code;   break;
+        case 24: codes->simpleCodes.underline   = code;   break;
         case  5:
         case  6:
-        case 25: codes->blink         = code;   break;
+        case 25: codes->simpleCodes.blink       = code;   break;
         case  7:
-        case 27: codes->invert        = code;   break;
+        case 27: codes->simpleCodes.invert      = code;   break;
         case  8:
-        case 28: codes->hide          = code;   break;
+        case 28: codes->simpleCodes.hide        = code;   break;
         case  9:
-        case 29: codes->strikeout     = code;   break;
+        case 29: codes->simpleCodes.strikeout   = code;   break;
         case 10:
         case 11:
         case 12:
@@ -629,11 +699,11 @@ enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** e
         case 16:
         case 17:
         case 18:
-        case 19: codes->font          = code;   break;
-        case 20: codes->fraktur       = code;   break;      // i dont know this word but i guess its a font thing
-        case 21: codes->dunderline    = code;   break;      // either double underline or disable bold... so it kinda double dips
+        case 19: codes->simpleCodes.font        = code;   break;
+        case 20: codes->simpleCodes.fraktur     = code;   break;      // i dont know this word but i guess its a font thing
+        case 21: codes->simpleCodes.dunderline  = code;   break;      // either double underline or disable bold... so it kinda double dips
         case 26:
-        case 50: codes->space         = code;   break;
+        case 50: codes->simpleCodes.space       = code;   break;
         case 30:
         case 31:
         case 32:
@@ -674,11 +744,11 @@ enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** e
         case 48: codes->bg_color.code = code;
                  ret = setSGRColor(&codes->bg_color, endptr);
                  break;
-        case 51: codes->frame         = code;   break;
+        case 51: codes->simpleCodes.frame       = code;   break;
         case 52:
-        case 54: codes->circle        = code;   break;
+        case 54: codes->simpleCodes.circle      = code;   break;
         case 53:
-        case 55: codes->overline      = code;   break;
+        case 55: codes->simpleCodes.overline    = code;   break;
         case 59: codes->ul_color.code = code;   break;
         case 58: codes->ul_color.code = code;
                  ret = setSGRColor(&codes->ul_color, endptr);
@@ -688,10 +758,10 @@ enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** e
         case 62:
         case 63:
         case 64:
-        case 65: codes->ideogram      = code;   break;
+        case 65: codes->simpleCodes.ideogram    = code;   break;
         case 73:
         case 74:
-        case 75: codes->superscript   = code;   break;
+        case 75: codes->simpleCodes.superscript = code;   break;
         default: ret = PARSE_ERROR;
     }
 
