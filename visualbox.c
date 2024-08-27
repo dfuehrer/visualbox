@@ -217,6 +217,7 @@ enum ParseSGRState {
 };
 enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** endptr);
 static enum ParseSGRState setSGRColor(struct SGRColor * color, char ** endptr);
+static void printSGRColor(const SGRColor * color, bool * havePrinted);
 
 static void debug_v(char str[]);
 
@@ -617,57 +618,9 @@ skip_checkterm:
                     printf("%hhu", codes.codeArr[codeNum]);
                 }
             }
-            if(codes.codeStruct.fg_color.code != 0){
-                if(first){
-                    first = false;
-                    printf("\033[");
-                }else{
-                    putchar(';');
-                }
-                printf("%hhu", codes.codeStruct.fg_color.code);
-                if(codes.codeStruct.fg_color.code == 38){
-                    putchar(';');
-                    if(codes.codeStruct.fg_color.depth == 5){
-                        printf("5;%hhu", codes.codeStruct.fg_color.ind);
-                    }else if(codes.codeStruct.fg_color.depth == 2){
-                        printf("2;%hhu;%hhu;%hhu", codes.codeStruct.fg_color.r, codes.codeStruct.fg_color.g, codes.codeStruct.fg_color.b);
-                    }
-                }
-            }
-            if(codes.codeStruct.bg_color.code != 0){
-                if(first){
-                    first = false;
-                    printf("\033[");
-                }else{
-                    putchar(';');
-                }
-                printf("%hhu", codes.codeStruct.bg_color.code);
-                if(codes.codeStruct.bg_color.code == 48){
-                    putchar(';');
-                    if(codes.codeStruct.bg_color.depth == 5){
-                        printf("5;%hhu", codes.codeStruct.bg_color.ind);
-                    }else if(codes.codeStruct.bg_color.depth == 2){
-                        printf("2;%hhu;%hhu;%hhu", codes.codeStruct.bg_color.r, codes.codeStruct.bg_color.g, codes.codeStruct.bg_color.b);
-                    }
-                }
-            }
-            if(codes.codeStruct.ul_color.code != 0){
-                if(first){
-                    first = false;
-                    printf("\033[");
-                }else{
-                    putchar(';');
-                }
-                printf("%hhu", codes.codeStruct.ul_color.code);
-                if(codes.codeStruct.ul_color.code == 98){
-                    putchar(';');
-                    if(codes.codeStruct.ul_color.depth == 5){
-                        printf("5;%hhu", codes.codeStruct.ul_color.ind);
-                    }else if(codes.codeStruct.ul_color.depth == 2){
-                        printf("2;%hhu;%hhu;%hhu", codes.codeStruct.ul_color.r, codes.codeStruct.ul_color.g, codes.codeStruct.ul_color.b);
-                    }
-                }
-            }
+            printSGRColor(&codes.codeStruct.fg_color, &first);
+            printSGRColor(&codes.codeStruct.bg_color, &first);
+            printSGRColor(&codes.codeStruct.ul_color, &first);
             if(!first){
                 putchar('m');
             }
@@ -692,6 +645,25 @@ skip_checkterm:
     return 0;
 }
 
+static void printSGRColor(const SGRColor * color, bool * havePrinted){
+    if(color->code != 0){
+        if(*havePrinted){
+            *havePrinted = false;
+            printf("\033[");
+        }else{
+            putchar(';');
+        }
+        printf("%hhu", color->code);
+        if(color->code == 38){
+            putchar(';');
+            if(color->depth == 5){
+                printf("5;%hhu", color->ind);
+            }else if(color->depth == 2){
+                printf("2;%hhu;%hhu;%hhu", color->r, color->g, color->b);
+            }
+        }
+    }
+}
 
 static enum ParseSGRState readSGRCode(SGRCode * code, const char * str, char ** endptr){
     long num = strtol(str, endptr, 10);
