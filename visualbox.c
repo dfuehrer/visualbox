@@ -123,6 +123,92 @@ union SGR {
     SGRCode codeArr[sizeof (struct SGRSet) / sizeof (SGRCode)];
 };
 
+enum SGRCodes {
+    SGR_RESET = 0,
+    SGR_BOLD  = 1,
+    SGR_FAINT = 2,
+    SGR_UNSET_BOLD = 22,
+    SGR_ITALIC = 3,
+    SGR_UNSET_ITALIC = 23,
+    SGR_UNDERLINE = 4,
+    SGR_UNSET_UNDERLINE = 24,
+    SGR_SLOW_BLINK = 5,
+    SGR_RAPID_BLINK = 6,
+    SGR_UNSET_BLINK = 25,
+    SGR_INVERT = 7,
+    SGR_UNSET_INVERT = 27,
+    SGR_HIDE = 8,
+    SGR_UNSET_HIDE = 28,
+    SGR_STRIKE = 9,
+    SGR_UNSET_STRIKE = 29,
+    SGR_PRIMARY_FONT = 10,
+    SGR_ALT_FONT1 = 11,
+    SGR_ALT_FONT2 = 12,
+    SGR_ALT_FONT3 = 13,
+    SGR_ALT_FONT4 = 14,
+    SGR_ALT_FONT5 = 15,
+    SGR_ALT_FONT6 = 16,
+    SGR_ALT_FONT7 = 17,
+    SGR_ALT_FONT8 = 18,
+    SGR_ALT_FONT9 = 19,
+    SGR_FRANKTUR = 20,
+    SGR_DUNDERLINE = 21,
+    SGR_SPACING = 26,
+    SGR_UNSET_SPACING = 50,
+    SGR_FG_BLACK = 30,
+    SGR_FG_RED = 31,
+    SGR_FG_GREEN = 32,
+    SGR_FG_YELLOW = 33,
+    SGR_FG_BLUE = 34,
+    SGR_FG_MAGENTA = 35,
+    SGR_FG_CYAN = 36,
+    SGR_FG_WHITE = 37,
+    SGR_FG_BRIGHT_BLACK = 90,
+    SGR_FG_BRIGHT_RED = 91,
+    SGR_FG_BRIGHT_GREEN = 92,
+    SGR_FG_BRIGHT_YELLOW = 93,
+    SGR_FG_BRIGHT_BLUE = 94,
+    SGR_FG_BRIGHT_MAGENTA = 95,
+    SGR_FG_BRIGHT_CYAN = 96,
+    SGR_FG_BRIGHT_WHITE = 97,
+    SGR_FG_COLOR = 38,
+    SGR_UNSET_FG_COLOR = 39,
+    SGR_BG_BLACK = 40,
+    SGR_BG_RED = 41,
+    SGR_BG_GREEN = 42,
+    SGR_BG_YELLOW = 43,
+    SGR_BG_BLUE = 44,
+    SGR_BG_MAGENTA = 45,
+    SGR_BG_CYAN = 46,
+    SGR_BG_WHITE = 47,
+    SGR_BG_BRIGHT_BLACK = 100,
+    SGR_BG_BRIGHT_RED = 101,
+    SGR_BG_BRIGHT_GREEN = 102,
+    SGR_BG_BRIGHT_YELLOW = 103,
+    SGR_BG_BRIGHT_BLUE = 104,
+    SGR_BG_BRIGHT_MAGENTA = 105,
+    SGR_BG_BRIGHT_CYAN = 106,
+    SGR_BG_BRIGHT_WHITE = 107,
+    SGR_BG_COLOR = 48,
+    SGR_UNSET_BG_COLOR = 49,
+    SGR_FRAMED = 51,
+    SGR_CIRCLED = 52,
+    SGR_UNSET_FRAME = 54,
+    SGR_OVERLINE = 53,
+    SGR_UNSET_OVERLINE = 55,
+    SGR_UNSET_UL_COLOR = 59,
+    SGR_UL_COLOR = 58,
+    SGR_IDEOGRAM_UL = 60,
+    SGR_IDEOGRAM_DL = 61,
+    SGR_IDEOGRAM_OL = 62,
+    SGR_IDEOGRAM_DOL = 63,
+    SGR_IDEOGRAM_STRESS = 64,
+    SGR_UNSET_IDEOGRAM = 65,
+    SGR_SUPERSCRIPT = 73,
+    SGR_SUBSCRIPT = 74,
+    SGR_UNSET_SCRIPT = 75,
+};
+
 enum ParseSGRState {
     PARSE_ERROR,    // found invalid format
     PARSE_CONT,     // ;
@@ -672,97 +758,97 @@ enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** e
     DEBUGF("got code %hhd, state: %d\n", code, ret);
 
     switch(code){
-        case  0: memset(codes, 0, sizeof *codes);         break;
-        // TODO make enum vals for these so this is readable
-        case  1: codes->simpleCodes.bold        = code;   break;
-        case  2:
-        case 22: codes->simpleCodes.faint       = code;   break;
-        case  3:
-        case 23: codes->simpleCodes.italic      = code;   break;
-        case  4:
-        case 24: codes->simpleCodes.underline   = code;   break;
-        case  5:
-        case  6:
-        case 25: codes->simpleCodes.blink       = code;   break;
-        case  7:
-        case 27: codes->simpleCodes.invert      = code;   break;
-        case  8:
-        case 28: codes->simpleCodes.hide        = code;   break;
-        case  9:
-        case 29: codes->simpleCodes.strikeout   = code;   break;
-        case 10:
-        case 11:
-        case 12:
-        case 13:
-        case 14:
-        case 15:
-        case 16:
-        case 17:
-        case 18:
-        case 19: codes->simpleCodes.font        = code;   break;
-        case 20: codes->simpleCodes.fraktur     = code;   break;      // i dont know this word but i guess its a font thing
-        case 21: codes->simpleCodes.dunderline  = code;   break;      // either double underline or disable bold... so it kinda double dips
-        case 26:
-        case 50: codes->simpleCodes.space       = code;   break;
-        case 30:
-        case 31:
-        case 32:
-        case 33:
-        case 34:
-        case 35:
-        case 36:
-        case 37:
-        case 39:
-        case 90:
-        case 91:
-        case 92:
-        case 93:
-        case 94:
-        case 95:
-        case 96:
-        case 97: codes->fg_color.code = code;   break;
-        case 38: codes->fg_color.code = code;
-                 ret = setSGRColor(&codes->fg_color, endptr);
-                 break;
-        case 40:
-        case 41:
-        case 42:
-        case 43:
-        case 44:
-        case 45:
-        case 46:
-        case 47:
-        case 49:
-        case 100:
-        case 101:
-        case 102:
-        case 103:
-        case 104:
-        case 105:
-        case 106:
-        case 107:codes->bg_color.code = code;   break;
-        case 48: codes->bg_color.code = code;
-                 ret = setSGRColor(&codes->bg_color, endptr);
-                 break;
-        case 51: codes->simpleCodes.frame       = code;   break;
-        case 52:
-        case 54: codes->simpleCodes.circle      = code;   break;
-        case 53:
-        case 55: codes->simpleCodes.overline    = code;   break;
-        case 59: codes->ul_color.code = code;   break;
-        case 58: codes->ul_color.code = code;
-                 ret = setSGRColor(&codes->ul_color, endptr);
-                 break;
-        case 60:
-        case 61:
-        case 62:
-        case 63:
-        case 64:
-        case 65: codes->simpleCodes.ideogram    = code;   break;
-        case 73:
-        case 74:
-        case 75: codes->simpleCodes.superscript = code;   break;
-        default: ret = PARSE_ERROR;
+        case SGR_RESET            : memset(codes, 0, sizeof *codes);         break;
+
+        case SGR_BOLD             : codes->simpleCodes.bold        = code;   break;
+        case SGR_FAINT            : codes->simpleCodes.faint       = code;   // fallthrough
+        case SGR_UNSET_BOLD       : codes->simpleCodes.bold        = code;   break;
+        case SGR_ITALIC           :
+        case SGR_UNSET_ITALIC     : codes->simpleCodes.italic      = code;   break;
+        case SGR_UNDERLINE        :
+        case SGR_UNSET_UNDERLINE  : codes->simpleCodes.underline   = code;   break;
+        case SGR_SLOW_BLINK       :
+        case SGR_RAPID_BLINK      :
+        case SGR_UNSET_BLINK      : codes->simpleCodes.blink       = code;   break;
+        case SGR_INVERT           :
+        case SGR_UNSET_INVERT     : codes->simpleCodes.invert      = code;   break;
+        case SGR_HIDE             :
+        case SGR_UNSET_HIDE       : codes->simpleCodes.hide        = code;   break;
+        case SGR_STRIKE           :
+        case SGR_UNSET_STRIKE     : codes->simpleCodes.strikeout   = code;   break;
+        case SGR_PRIMARY_FONT     :
+        case SGR_ALT_FONT1        :
+        case SGR_ALT_FONT2        :
+        case SGR_ALT_FONT3        :
+        case SGR_ALT_FONT4        :
+        case SGR_ALT_FONT5        :
+        case SGR_ALT_FONT6        :
+        case SGR_ALT_FONT7        :
+        case SGR_ALT_FONT8        :
+        case SGR_ALT_FONT9        : codes->simpleCodes.font        = code;   break;
+        case SGR_FRANKTUR         : codes->simpleCodes.fraktur     = code;   break;      // i dont know this word but i guess its a font thing
+        case SGR_DUNDERLINE       : codes->simpleCodes.dunderline  = code;   break;      // either double underline or disable bold... so it kinda double dips
+        case SGR_SPACING          :
+        case SGR_UNSET_SPACING    : codes->simpleCodes.space       = code;   break;
+        case SGR_FG_BLACK         :
+        case SGR_FG_RED           :
+        case SGR_FG_GREEN         :
+        case SGR_FG_YELLOW        :
+        case SGR_FG_BLUE          :
+        case SGR_FG_MAGENTA       :
+        case SGR_FG_CYAN          :
+        case SGR_FG_WHITE         :
+        case SGR_FG_BRIGHT_BLACK  :
+        case SGR_FG_BRIGHT_RED    :
+        case SGR_FG_BRIGHT_GREEN  :
+        case SGR_FG_BRIGHT_YELLOW :
+        case SGR_FG_BRIGHT_BLUE   :
+        case SGR_FG_BRIGHT_MAGENTA:
+        case SGR_FG_BRIGHT_CYAN   :
+        case SGR_FG_BRIGHT_WHITE  :
+        case SGR_UNSET_FG_COLOR   : codes->fg_color.code = code;   break;
+        case SGR_FG_COLOR         : codes->fg_color.code = code;
+                                    ret = setSGRColor(&codes->fg_color, endptr);
+                                    break;
+        case SGR_BG_BLACK         :
+        case SGR_BG_RED           :
+        case SGR_BG_GREEN         :
+        case SGR_BG_YELLOW        :
+        case SGR_BG_BLUE          :
+        case SGR_BG_MAGENTA       :
+        case SGR_BG_CYAN          :
+        case SGR_BG_WHITE         :
+        case SGR_BG_BRIGHT_BLACK  :
+        case SGR_BG_BRIGHT_RED    :
+        case SGR_BG_BRIGHT_GREEN  :
+        case SGR_BG_BRIGHT_YELLOW :
+        case SGR_BG_BRIGHT_BLUE   :
+        case SGR_BG_BRIGHT_MAGENTA:
+        case SGR_BG_BRIGHT_CYAN   :
+        case SGR_BG_BRIGHT_WHITE  :
+        case SGR_UNSET_BG_COLOR   : codes->bg_color.code = code;   break;
+        case SGR_BG_COLOR         : codes->bg_color.code = code;
+                                    ret = setSGRColor(&codes->bg_color, endptr);
+                                    break;
+        case SGR_FRAMED           : codes->simpleCodes.frame       = code;   break;
+        case SGR_CIRCLED          : codes->simpleCodes.circle      = code;   // fallthrough
+        case SGR_UNSET_FRAME      : codes->simpleCodes.frame       = code;   break;
+        case SGR_OVERLINE         :
+        case SGR_UNSET_OVERLINE   : codes->simpleCodes.overline    = code;   break;
+        case SGR_UNSET_UL_COLOR   : codes->ul_color.code = code;   break;
+        case SGR_UL_COLOR         : codes->ul_color.code = code;
+                                    ret = setSGRColor(&codes->ul_color, endptr);
+                                    break;
+        case SGR_IDEOGRAM_UL      :
+        case SGR_IDEOGRAM_DL      :
+        case SGR_IDEOGRAM_OL      :
+        case SGR_IDEOGRAM_DOL     :
+        case SGR_IDEOGRAM_STRESS  :
+        case SGR_UNSET_IDEOGRAM   : codes->simpleCodes.ideogram    = code;   break;
+        case SGR_SUPERSCRIPT      :
+        case SGR_SUBSCRIPT        :
+        case SGR_UNSET_SCRIPT     : codes->simpleCodes.superscript = code;   break;
+        default                   : ret = PARSE_ERROR;
     }
 
     return ret;
