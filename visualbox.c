@@ -240,6 +240,7 @@ int main(const int argc, const char * const argv[]){
     int wait_tenths = 1;
     bool processAllSGR = true;
     bool printSGRNewLine = true;
+    bool ansifilter = false;
     map_t params;
     map_t flags;
     initMap(&params);
@@ -249,6 +250,18 @@ int main(const int argc, const char * const argv[]){
     MapData * heightNode = addMapMembers(&params, NULL,    INT,  false, "SsdS", STRVIEW("height"), "h", 1, STRVIEW("columns"));
     addMapMembers(&params, &tabsize,INT,  true,  "Ssd",  STRVIEW("tabs"  ), "t", 1);
     addMapMembers(&params, delim,   STR,  true,  "Ssd",  STRVIEW("delim" ), "d", 1);
+    MapData * processAllSGRNode     = addMapMembers(&flags , &flagTrue ,   BOOL, false,  "Ssd",  STRVIEW("process-whole-line"), STR_LEN("p"));
+    MapData * noProcessAllSGRNode   = addMapMembers(&flags , &flagFalse,   BOOL, false,  "Ssd",  STRVIEW("no-process-whole-line"), STR_LEN("P"));
+    MapData * printSGRNewLineNode   = addMapMembers(&flags , &flagTrue ,   BOOL, false,  "Ssd",  STRVIEW("multiline-color"), STR_LEN("m"));
+    MapData * noPrintSGRNewLineNode = addMapMembers(&flags , &flagFalse,   BOOL, false,  "Ssd",  STRVIEW("no-multiline-color"), STR_LEN("M"));
+    MapData * ansiFilterNode        = addMapMembers(&flags , &flagFalse,   BOOL, false,  "Ssd",  STRVIEW("ansifilter"), STR_LEN("A"));
+    setNodeNegation(    processAllSGRNode,   noProcessAllSGRNode);
+    setNodeNegation(  noProcessAllSGRNode,     processAllSGRNode);
+    setNodeNegation(  printSGRNewLineNode, noPrintSGRNewLineNode);
+    setNodeNegation(noPrintSGRNewLineNode,   printSGRNewLineNode);
+    setNodeNegation(    processAllSGRNode, noPrintSGRNewLineNode);
+    setNodeNegation(  printSGRNewLineNode,        ansiFilterNode);
+    setNodeNegation(    processAllSGRNode,        ansiFilterNode);
     // TODO add color stripping options
 #ifndef NO_LIBGRAPHEME
     // TODO add option to tell it not to try mode 2027
@@ -314,6 +327,10 @@ int main(const int argc, const char * const argv[]){
     height  = getNode_int(heightNode);
     tabsize = getMapMember_int(&params, STR_LEN("tabs"  ));
     delim   = getMapMemberData(&params, STR_LEN("delim" ));
+    processAllSGR   = getNode_bool(  processAllSGRNode);
+    printSGRNewLine = getNode_bool(printSGRNewLineNode);
+    ansifilter = getNode_bool(ansiFilterNode);
+    DEBUGF("p: %d, m: %d, A: %d\n", processAllSGR, printSGRNewLine, ansifilter);
 #ifndef NO_LIBGRAPHEME
     clust   = getMapMember_bool(&flags, STR_LEN("force-cluster"));
     no_2027 = getMapMember_bool(&flags, STR_LEN("no-mode-2027"));
@@ -486,9 +503,14 @@ skip_checkterm:
                         // - maybe clear codes
                     }
                 }
+                DEBUGF("end color at char %zu\n", tmp-line);
                 cInc = 1;
-                c = tmp - cInc;
-                DEBUGF("end color at char %zu\n", c-line);
+                if(!ansifilter){
+                    c = tmp - cInc;
+                }else{
+                    memmove(c, tmp, nread - (tmp-line));
+                    --c;
+                }
                 continue;
             }
             if(*c == '\t'){
@@ -580,6 +602,11 @@ skip_checkterm:
             prevColStart = c + cInc;
             //DEBUGF("%c: %d\n", *c, visstrlen);
         }
+        if(ansifilter){
+            // probably dont want the possibility of printing color on next line after clearing color from this line
+            SGRstate = PARSE_CLEAR;
+        }
+        enum ParseSGRState endSGRstate = SGRstate;
 
         if(processAllSGR){
             for( ; (*c != '\n') && (*c != '\0') && (*c != '\r'); ++c){
@@ -600,13 +627,17 @@ skip_checkterm:
                     continue;
                 }
             }
+            if(ansifilter){
+                // probably dont want the possibility of printing color on next line after clearing color from this line
+                SGRstate = PARSE_CLEAR;
+            }
         }
 
         // TODO instead of resetting color at end look for color
-        if(SGRstate == PARSE_FINISH){
+        c = prevColStart;
+        if(endSGRstate == PARSE_FINISH){
             DEBUGF("resetting color at char %zu (ended at %zu)\n", prevColStart - line, c - line);
             // add color reset at end
-            c = prevColStart;
             if((size_t)(c - line + END_COL_SIZE) > len){  // END_COL_SIZE is the length of the color reset str
                 len += END_COL_SIZE;
                 size_t tmpdist = c - line;
@@ -621,10 +652,7 @@ skip_checkterm:
 
         //DEBUGF("width: %d\n", visstrlen);
 
-        // i can just end it here but in odd circumstances that arent typical of the use of this program its faster to use memset so my hands were tied
-        // its really not about wanting to do that from the start and just about speed in real use definitely dont doubt me
-        //printf("%s%-*s|\n", line, width - visstrlen, "");
-        //printf("%s%-*s%lc\n", line, width - visstrlen, "", L'│');
+        // finally print the line at the fixed (visual) width
         printf("%s%-*s%s\n", line, width - visstrlen, "", delim);
 
         // TODO add args to turn on setting codes for new lines
