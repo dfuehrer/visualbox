@@ -21,10 +21,10 @@
 #include "libgrapheme/grapheme.h"
 
 // maybe test on this stuff:
-// 12345678901234567890123456789123456789
-// 🧑‍🌾
-// Tëst 👨‍👩‍👦 🇺🇸 नी நி!
-// u̲n̲d̲e̲r̲l̲i̲n̲e̲d̲
+//[1;2;95m1234567890[48;5;24m1234567890[38;2;250;25;30m1234567890
+//🧑‍🌾
+//Tëst 👨‍👩‍👦 🇺🇸 नी நி!
+//u̲n̲d̲e̲r̲[0;4ml̲i̲n̲[21me̲[md̲
 
 #define END_COL_STR  ("\033[0m")
 #define END_COL_SIZE (sizeof END_COL_STR)
@@ -238,6 +238,8 @@ int main(const int argc, const char * const argv[]){
     bool clust = false;
     bool no_2027 = false;
     int wait_tenths = 1;
+    bool processAllSGR = true;
+    bool printSGRNewLine = true;
     map_t params;
     map_t flags;
     initMap(&params);
@@ -578,6 +580,28 @@ skip_checkterm:
             prevColStart = c + cInc;
             //DEBUGF("%c: %d\n", *c, visstrlen);
         }
+
+        if(processAllSGR){
+            for( ; (*c != '\n') && (*c != '\0') && (*c != '\r'); ++c){
+                if(*c == '\033' && c[1] == '['){
+                    DEBUGF("got color at char %zu\n", c-line);
+                    char * tmp = c + 2;
+                    SGRstate = PARSE_CONT;
+                    while(SGRstate == PARSE_CONT){
+                        SGRstate = setSGRCode(&codes.codeStruct, tmp, &tmp);
+                        if(SGRstate == PARSE_ERROR){
+                            DEBUGF("error, bad SGR code, moving on like it was fine\n");
+                            // TODO do something maybe depending on args
+                            // - maybe clear codes
+                        }
+                    }
+                    c = tmp - 1;
+                    DEBUGF("end color at char %zu\n", c-line);
+                    continue;
+                }
+            }
+        }
+
         // TODO instead of resetting color at end look for color
         if(SGRstate == PARSE_FINISH){
             DEBUGF("resetting color at char %zu (ended at %zu)\n", prevColStart - line, c - line);
@@ -594,9 +618,8 @@ skip_checkterm:
         }else{
             *c = '\0';
         }
-        //DEBUGF("width: %d\n", visstrlen);
 
-        // TODO if height > num lines in file, maybe pad with whitespace
+        //DEBUGF("width: %d\n", visstrlen);
 
         // i can just end it here but in odd circumstances that arent typical of the use of this program its faster to use memset so my hands were tied
         // its really not about wanting to do that from the start and just about speed in real use definitely dont doubt me
@@ -605,7 +628,7 @@ skip_checkterm:
         printf("%s%-*s%s\n", line, width - visstrlen, "", delim);
 
         // TODO add args to turn on setting codes for new lines
-        if(true && SGRstate == PARSE_FINISH){
+        if(printSGRNewLine && SGRstate == PARSE_FINISH){
             bool first = true;
             for(size_t codeNum = 0; codeNum < sizeof codes.codeStruct.simpleCodes; ++codeNum){
                 if(codes.codeArr[codeNum] != 0){
@@ -626,20 +649,10 @@ skip_checkterm:
             }
         }
 
-        // add spaces at end if missing room
-        // TODO need to allocate more space to be able to do this (should allocate it at the same time as the usedColor realloc
-        //c += END_COL_LEN;
-        //if(width > visstrlen){
-        //    // after i memset it doesnt seem to want me to set vals outside of the memset so im just going to memset more and then it should work
-        //    //wmemset(c, L' ', width - visstrlen + 2);
-        //    memset(c, ' ', width - visstrlen);
-        //}
-        //// NOTE this might stick out past the end of the string
-        ////strcpy(c + width - visstrlen, "│");
-        ////printf("%s\n", line);
-        //printf("%s%lc\n", line, L'│');
         ++i;
     }
+    // TODO if height > num lines in file, maybe pad with whitespace
+
     // TODO maybe dont do final free just before quitting since it just takes time for no reason
     free(line);
     return 0;
