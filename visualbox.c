@@ -312,6 +312,11 @@ int main(const int argc, const char * const argv[]){
                 "\t[ --no-mode-2027|-N ]                            don't check if terminal can use clustering\n"
                 "\t[ --wait-tenths|-W ]                             time to wait for mode 2027 result from terminal (in tenths of seconds)\n"
 #endif // NO_LIBGRAPHEME
+                "\t[ --multiline-color|-m ]                         allow ansi color sequences to span multiple lines (default)\n"
+                "\t[ --no-multiline-color|-M ]                      negation of --multiline-color\n"
+                "\t[ --process-whole-line|-p ]                      process color sequences after end of width (default)\n"
+                "\t[ --no-process-whole-line|-P ]                   negation of --process-whole-line\n"
+                "\t[ --ansifilter|-A ]                              filter out ansi color sequences\n"
                 , tabsize, delim);
         return 1;
     }
@@ -330,7 +335,6 @@ int main(const int argc, const char * const argv[]){
     processAllSGR   = getNode_bool(  processAllSGRNode);
     printSGRNewLine = getNode_bool(printSGRNewLineNode);
     ansifilter = getNode_bool(ansiFilterNode);
-    DEBUGF("p: %d, m: %d, A: %d\n", processAllSGR, printSGRNewLine, ansifilter);
 #ifndef NO_LIBGRAPHEME
     clust   = getMapMember_bool(&flags, STR_LEN("force-cluster"));
     no_2027 = getMapMember_bool(&flags, STR_LEN("no-mode-2027"));
