@@ -699,7 +699,7 @@ static void printSGRColor(const SGRColor * color, bool * havePrinted){
             putchar(';');
         }
         printf("%hhu", color->code);
-        if(color->code == 38){
+        if(color->code == SGR_FG_COLOR || color->code == SGR_BG_COLOR || color->code == SGR_UL_COLOR){
             putchar(';');
             if(color->depth == 5){
                 printf("5;%hhu", color->ind);
@@ -778,7 +778,7 @@ enum ParseSGRState setSGRCode(struct SGRSet * codes, const char * str, char ** e
         case SGR_RESET            : memset(codes, 0, sizeof *codes);         break;
 
         case SGR_BOLD             : codes->simpleCodes.bold        = code;   break;
-        case SGR_FAINT            : codes->simpleCodes.faint       = code;   // fallthrough
+        case SGR_FAINT            : codes->simpleCodes.faint       = code;   break;
         case SGR_UNSET_BOLD       : codes->simpleCodes.bold        = code;   break;
         case SGR_ITALIC           :
         case SGR_UNSET_ITALIC     : codes->simpleCodes.italic      = code;   break;
