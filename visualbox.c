@@ -12,18 +12,19 @@
 #include <termios.h>
 #include <fcntl.h>
 #include <poll.h>
+
+#include "libgrapheme/grapheme.h"
 #endif  // NO_LIBGRAPHEME
 #include <sys/types.h>
 #include <wchar.h>
 #include <locale.h>
 
 #include "clparser/parseargs.h"
-#include "libgrapheme/grapheme.h"
 
 // maybe test on this stuff:
 //[1;2;95m1234567890[48;5;24m1234567890[38;2;250;25;30m1234567890
 //🧑‍🌾
-//Tëst 👨‍👩‍👦 🇺🇸 नी நி!
+//Të[22ms[2mt 👨‍👩‍👦 🇺🇸 नी நி!
 //u̲n̲d̲e̲r̲[0;4ml̲i̲n̲[21me̲[md̲
 
 #define END_COL_STR  ("\033[0m")
@@ -65,6 +66,12 @@ typedef enum {
     DEC_PERMSET   = '3',
     DEC_PERMRESET = '4',
 } DEC_RESPONSE;
+static void chrError(char expected, char got);
+DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen);
+
+//#define MAX_CC  ((1 << (8*sizeof (cc_t))) - 1)
+#define MAX_CC  ((cc_t) -1)
+#endif  // NO_LIBGRAPHEME
 
 enum BASES {
     BIN = 2,
@@ -74,12 +81,6 @@ enum BASES {
 };
 
 static int reprChar(const unsigned char c, char * outStr, const size_t outStrSize, const enum BASES base);
-static void chrError(char expected, char got);
-DEC_RESPONSE readDECResponse(int fd, char mode[], size_t modelen);
-
-//#define MAX_CC  ((1 << (8*sizeof (cc_t))) - 1)
-#define MAX_CC  ((cc_t) -1)
-#endif  // NO_LIBGRAPHEME
 
 typedef unsigned char SGRCode;
 //typedef StringView SGRCode;
@@ -269,6 +270,8 @@ int main(const int argc, const char * const argv[]){
     addMapMembers(&flags , NULL,    BOOL, false, "SS",   STRVIEW("no-mode-2027"  ), STRVIEW("N"));
     // TODO consider making this ms instead of tenths
     addMapMembers(&params, &wait_tenths, INT, true, "SS", STRVIEW("wait-tenths"  ), STRVIEW("W"));
+#else
+    (void) wait_tenths;
 #endif // NO_LIBGRAPHEME
     MapData * fileNode = addMapMembers(&params, "-",     STR,  true,  "Ssd",  STRVIEW("file"  ), "f", 1);
     MapData * positionalNodes[] = {
